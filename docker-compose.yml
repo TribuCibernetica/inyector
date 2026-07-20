@@ -1,0 +1,13 @@
+services:
+  inyector:
+    build: .
+    image: tribucibernetica/inyector:1.0.0
+    container_name: inyector
+    network_mode: host
+    volumes:
+      - ./reports:/app/reports
+    environment:
+      - PYTHONUNBUFFERED=1
+      - INYECTOR_REPORTS_DIR=/app/reports
+    stdin_open: true
+    tty: true

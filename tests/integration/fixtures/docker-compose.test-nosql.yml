@@ -1,0 +1,16 @@
+services:
+  test_mongo:
+    image: mongo:6
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  test_nosql_target:
+    build: ./vulnerable_nosql_app
+    depends_on:
+      test_mongo:
+        condition: service_healthy
+    ports:
+      - "18081:80"

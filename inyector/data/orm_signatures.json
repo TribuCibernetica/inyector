@@ -1,0 +1,65 @@
+{
+  "django_orm": {
+    "errors": [
+      "django.db.utils.OperationalError",
+      "django.db.utils.ProgrammingError",
+      "DoesNotExist",
+      "MultipleObjectsReturned",
+      "django.db.utils.IntegrityError"
+    ],
+    "escape_hatches": [".raw()", ".extra()", "RawSQL()"]
+  },
+  "sqlalchemy": {
+    "errors": [
+      "sqlalchemy.exc.OperationalError",
+      "sqlalchemy.exc.ProgrammingError",
+      "StatementError",
+      "(psycopg2",
+      "(pymysql"
+    ],
+    "escape_hatches": ["text()", "engine.execute()", "connection.execute()"]
+  },
+  "hibernate": {
+    "errors": [
+      "org.hibernate.exception",
+      "HibernateException",
+      "QueryException",
+      "HQL",
+      "javax.persistence"
+    ],
+    "escape_hatches": ["createNativeQuery()", "createSQLQuery()"]
+  },
+  "prisma": {
+    "errors": [
+      "PrismaClientKnownRequestError",
+      "P2010",
+      "P2002",
+      "@prisma/client"
+    ],
+    "escape_hatches": ["$queryRaw", "$executeRaw", "$queryRawUnsafe"]
+  },
+  "sequelize": {
+    "errors": [
+      "SequelizeDatabaseError",
+      "SequelizeValidationError",
+      "SequelizeConnectionError"
+    ],
+    "escape_hatches": ["query()", "literal()", "col()"]
+  },
+  "active_record": {
+    "errors": [
+      "ActiveRecord::StatementInvalid",
+      "ActiveRecord::RecordNotFound",
+      "PG::SyntaxError"
+    ],
+    "escape_hatches": ["find_by_sql()", "execute()", "connection.execute()"]
+  },
+  "eloquent": {
+    "errors": [
+      "Illuminate\\Database\\QueryException",
+      "SQLSTATE",
+      "Illuminate\\Database"
+    ],
+    "escape_hatches": ["DB::raw()", "DB::select()", "whereRaw()"]
+  }
+}
