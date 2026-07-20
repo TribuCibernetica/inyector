@@ -11,3 +11,10 @@ urllib3==2.2.1
 fake-useragent==1.5.1
 colorama==0.4.6
 pydantic==2.6.1
+# Sin esto, requests/urllib3 no pueden decodificar respuestas con
+# Content-Encoding: br (Brotli) — muy común en sitios modernos detrás
+# de CDNs. response.text queda como binario sin decodificar, y TODOS
+# los detectores que buscan firmas por substring (WAF, Stack, ORM,
+# Crawler) fallan en silencio contra esos sitios sin ningún error
+# visible (bug real encontrado probando contra preview.owasp-juice.shop).
+brotli==1.1.0

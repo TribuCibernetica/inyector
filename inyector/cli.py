@@ -7,6 +7,7 @@ y orquesta el flujo completo de reconocimiento → inteligencia → ejecución �
 import os
 import sys
 import time
+import json
 import subprocess
 from datetime import datetime
 
@@ -26,6 +27,7 @@ from inyector.recon.waf_detector import WAFDetector
 from inyector.recon.stack_detector import StackDetector
 from inyector.recon.orm_detector import ORMDetector
 from inyector.recon.graphql_detector import GraphQLDetector
+from inyector.recon.crawler import Crawler
 from inyector.recon.nosqli_detector import NoSQLiDetector
 from inyector.recon.endpoint_mapper import EndpointMapper
 from inyector.intelligence.tamper_selector import TamperSelector
@@ -386,6 +388,11 @@ def _run_recon_phase(url, param, method, data, waf, session,
 @click.option("--no-sqlmap", is_flag=True, default=False, help="Solo reconocimiento")
 @click.option("--proxy", default=None, help="Proxy HTTP")
 @click.option("--tor", is_flag=True, default=False, help="Enrutar por Tor")
+@click.option("--crawl", is_flag=True, default=False,
+              help="Explorar el sitio en busca de endpoints/parámetros reales "
+                   "antes de escanear (links, forms, y rutas de API embebidas en "
+                   "JS de SPAs). Necesario cuando la URL dada no tiene parámetros, "
+                   "ej. la landing page de una app Angular/React/Vue.")
 @click.option("--resume", is_flag=True, default=False,
               help="Reusar el recon guardado de un scan anterior al mismo target "
                    "(evita repetir peticiones de WAF/Stack/ORM/GraphQL)")
@@ -394,7 +401,7 @@ def _run_recon_phase(url, param, method, data, waf, session,
 def scan(url, param, method, data, cookie, header, stealth, fast,
          waf, technique, tamper, threads, level, risk, output_dir,
          report_format, graphql, nosql, websocket, no_sqlmap, proxy, tor,
-         resume, verbose, quiet):
+         crawl, resume, verbose, quiet):
     """Ejecuta un scan completo de SQL Injection."""
     show_banner()
     configure_logging(verbose=verbose, quiet=quiet)
@@ -423,6 +430,55 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
 
     # Crear sesión HTTP
     session = create_session(cookie=cookie, headers=list(header), proxy=proxy)
+
+    crawl_candidates = []
+    if crawl:
+        console.print(
+            "[bold #00ff88][*] Explorando el sitio en busca de "
+            "endpoints...[/bold #00ff88]"
+        )
+        crawl_candidates = Crawler().crawl(url, session)
+
+        if crawl_candidates:
+            console.print(
+                f"  [#00ff88]→[/] {len(crawl_candidates)} endpoint(s) "
+                f"candidato(s) encontrado(s):"
+            )
+            for c in crawl_candidates[:8]:
+                payload = c.get("params") or c.get("json_body") or {}
+                console.print(
+                    f"    [dim]•[/] {c['method']} {c['url']} "
+                    f"{list(payload.keys())} (prioridad: {c['priority']:.0%})"
+                )
+
+            # Si la URL original no tiene parámetros propios, usamos
+            # el candidato de mayor prioridad como target real — sin
+            # esto, sqlmap no tendría nada que probar (el caso exacto
+            # que motivó este módulo: la landing page de una SPA).
+            original_has_params = "?" in url or bool(data)
+            if not original_has_params:
+                best = crawl_candidates[0]
+                url = best["url"]
+                method = best["method"]
+                if best.get("json_body"):
+                    data = json.dumps(best["json_body"])
+                    param = param or next(iter(best["json_body"]), None)
+                elif best.get("params"):
+                    url = f"{url}?" + "&".join(
+                        f"{k}={v}" for k, v in best["params"].items()
+                    )
+                    param = param or next(iter(best["params"]), None)
+                console.print(
+                    f"  [bold #00ff88]→[/] Sin parámetros en la URL original — "
+                    f"usando el candidato de mayor prioridad en su lugar:\n"
+                    f"    [bold]{method} {url}[/bold]"
+                )
+        else:
+            console.print(
+                "  [yellow]→ No se encontraron endpoints candidatos "
+                "adicionales[/yellow]"
+            )
+        console.print()
 
     # Motor de stealth
     stealth_engine = StealthEngine()
@@ -882,8 +938,6 @@ def report(input_file, report_format, output_dir):
     """Genera un reporte a partir de resultados existentes."""
     show_banner()
     configure_logging()
-
-    import json
 
     if not os.path.exists(input_file):
         console.print(
