@@ -5,6 +5,7 @@ los resultados del reconocimiento e inteligencia.
 """
 
 import os
+import shlex
 from typing import Optional
 from inyector.utils.logger import get_logger
 
@@ -44,15 +45,19 @@ class CommandBuilder:
         stealth = scan_config.get("stealth", True)
 
         # 1. URL base
-        parts.append(f'-u "{url}"')
+        parts.append(f"-u {shlex.quote(url)}")
 
         # 2. Modo batch (no interactivo)
         parts.append("--batch")
         parts.append("--no-cast")
 
         # 3. Método y datos POST
+        # shlex.quote (no comillas dobles a mano): un body JSON trae
+        # sus propias comillas dobles, que rompían el armado del
+        # comando cuando se lo pasa al shell (bug real encontrado al
+        # agregar soporte de --crawl para candidatos JSON tipo login).
         if method.upper() == "POST" and data:
-            parts.append(f'--data="{data}"')
+            parts.append(f"--data={shlex.quote(data)}")
 
         # 4. Parámetro objetivo
         if param:
@@ -86,11 +91,11 @@ class CommandBuilder:
 
         # 9. Cookie de sesión
         if cookie:
-            parts.append(f'--cookie="{cookie}"')
+            parts.append(f"--cookie={shlex.quote(cookie)}")
 
         # 10. Headers adicionales
         for header in headers:
-            parts.append(f'--header="{header}"')
+            parts.append(f"--header={shlex.quote(header)}")
 
         # 11. Level y Risk
         parts.append(f"--level={level}")
@@ -104,7 +109,7 @@ class CommandBuilder:
 
         # 14. Proxy
         if proxy:
-            parts.append(f'--proxy="{proxy}"')
+            parts.append(f"--proxy={shlex.quote(proxy)}")
 
         # 15. Flags de evasión adicionales según WAF
         if waf == "cloudflare":
@@ -123,7 +128,7 @@ class CommandBuilder:
                 "eloquent": "QueryException",
             }
             if orm_name in orm_strings:
-                parts.append(f'--string="{orm_strings[orm_name]}"')
+                parts.append(f"--string={shlex.quote(orm_strings[orm_name])}")
 
         # 17. Flush session
         parts.append("--flush-session")
