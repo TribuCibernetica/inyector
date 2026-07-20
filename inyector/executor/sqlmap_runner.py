@@ -7,6 +7,7 @@ y muestra el progreso al usuario con indicadores visuales.
 import subprocess
 import threading
 import os
+import time
 from typing import Optional
 from rich.console import Console
 from rich.live import Live
@@ -131,30 +132,91 @@ class SqlmapRunner:
                     else:
                         self.console.print(line)
             else:
+                # Estado compartido entre el loop que lee stdout (se
+                # BLOQUEA esperando cada línea) y el hilo "ticker" de
+                # abajo — necesario porque si sqlmap se queda varios
+                # minutos sin imprimir nada (probando payloads contra
+                # un target lento, por ejemplo), el loop principal no
+                # tiene ninguna oportunidad de refrescar el spinner, y
+                # se ve exactamente igual a un cuelgue real. El ticker
+                # actualiza el texto cada segundo de forma
+                # independiente para que siempre se vea que sigue vivo.
+                start_time = time.time()
+                state = {"status": current_status, "lines": 0, "vuln": False}
+                stop_ticker = threading.Event()
+                # live.update() se llama desde 2 hilos (este ticker +
+                # el loop principal que lee stdout) — sin este lock,
+                # una race condition entre ambos puede tirar una
+                # excepción no capturada dentro del hilo del ticker
+                # (daemon, sin logging) y matarlo en silencio, dejando
+                # el spinner congelado para siempre aunque sqlmap
+                # siga corriendo perfectamente de fondo (bug real
+                # encontrado probando contra un target lento real).
+                render_lock = threading.Lock()
+
+                def _render_label():
+                    elapsed = int(time.time() - start_time)
+                    mins, secs = divmod(elapsed, 60)
+                    elapsed_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+                    return (
+                        f"{state['status']} · {elapsed_str} transcurridos "
+                        f"· {state['lines']} líneas de sqlmap procesadas"
+                    )
+
+                def _safe_update(live, renderable):
+                    try:
+                        with render_lock:
+                            live.update(renderable)
+                    except Exception as e:
+                        logger.debug(f"Error actualizando el spinner (ignorado): {e}")
+
+                def _tick(live):
+                    while not stop_ticker.wait(1.0):
+                        if not state["vuln"]:
+                            _safe_update(
+                                live,
+                                Spinner(
+                                    "dots",
+                                    text=Text(_render_label(), style="cyan"),
+                                ),
+                            )
+
                 with Live(
-                    Spinner("dots", text=Text(current_status, style="cyan")),
+                    Spinner("dots", text=Text(_render_label(), style="cyan")),
                     console=self.console,
                     refresh_per_second=4,
                 ) as live:
+                    ticker_thread = threading.Thread(
+                        target=_tick, args=(live,), daemon=True,
+                    )
+                    ticker_thread.start()
+
                     for line in process.stdout:
                         line = line.rstrip()
                         stdout_lines.append(line)
+                        state["lines"] += 1
 
                         new_status = self._parse_progress(line)
                         if new_status:
+                            state["status"] = new_status
                             current_status = new_status
                             if "identificada" in new_status:
                                 vuln_found = True
-                                live.update(
-                                    Text(f"✅ {new_status}", style="bold green")
+                                state["vuln"] = True
+                                _safe_update(
+                                    live, Text(f"✅ {new_status}", style="bold green"),
                                 )
                             else:
-                                live.update(
+                                _safe_update(
+                                    live,
                                     Spinner(
                                         "dots",
-                                        text=Text(current_status, style="cyan"),
-                                    )
+                                        text=Text(_render_label(), style="cyan"),
+                                    ),
                                 )
+
+                    stop_ticker.set()
+                    ticker_thread.join(timeout=2)
 
             process.wait()
             stderr_thread.join(timeout=5)
@@ -229,6 +291,14 @@ class SqlmapRunner:
             Mensaje de estado traducido o string vacío.
         """
         line_lower = line.lower()
+
+        # sqlmap suele lanzar primero una suposición heurística ("it
+        # looks like the back-end DBMS is 'X'. Do you want to skip...")
+        # que también contiene "the back-end dbms is" — mostrar
+        # "DBMS identificado" ahí es prematuro y engañoso, porque
+        # todavía no confirmó ninguna inyección real.
+        if "it looks like" in line_lower:
+            return ""
 
         for pattern, message in self.PROGRESS_MAP.items():
             if pattern in line_lower:

@@ -31,3 +31,23 @@ def test_legitimate_clean_scan_is_not_flagged_as_failure():
 
 def test_empty_output_is_not_flagged_as_failure():
     assert SqlmapRunner._detect_failure_reason("") is None
+
+
+def test_heuristic_dbms_guess_does_not_trigger_premature_dbms_status():
+    # Regresión: "it looks like the back-end DBMS is 'X'..." es una
+    # SUPOSICIÓN heurística temprana (antes de confirmar cualquier
+    # inyección), no la confirmación real. Mostrar "DBMS identificado"
+    # ahí hace que el spinner muestre un estado engañosamente
+    # avanzado mientras sqlmap recién está empezando a probar payloads.
+    runner = SqlmapRunner()
+    line = (
+        "it looks like the back-end DBMS is 'MySQL'. Do you want to "
+        "skip test payloads specific for other DBMSes? [Y/n] Y"
+    )
+    assert runner._parse_progress(line) == ""
+
+
+def test_confirmed_dbms_line_still_triggers_status():
+    runner = SqlmapRunner()
+    line = "[19:45:26] [INFO] the back-end DBMS is MySQL"
+    assert runner._parse_progress(line) == "DBMS identificado..."
