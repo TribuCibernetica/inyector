@@ -41,7 +41,10 @@ from inyector.reporting.html_report import HTMLReportGenerator
 from inyector.reporting.json_report import JSONReportGenerator
 from inyector.reporting.markdown_report import MarkdownReportGenerator
 
-console = Console()
+# force_terminal=True: ver la nota en sqlmap_runner.py — la detección
+# automática de terminal de Rich no es confiable en contenedores
+# Linux lanzados desde Docker Desktop en Windows.
+console = Console(force_terminal=True)
 logger = get_logger(__name__)
 
 # Banner ASCII de inyector

@@ -8,6 +8,7 @@ import subprocess
 import threading
 import os
 import time
+import select
 from typing import Optional
 from rich.console import Console
 from rich.live import Live
@@ -62,7 +63,15 @@ class SqlmapRunner:
             verbose: Si es True, muestra todo el output de sqlmap.
         """
         self.verbose = verbose
-        self.console = Console()
+        # force_terminal=True: la detección automática de Rich
+        # (isatty() + $TERM) no es confiable corriendo en un
+        # contenedor Linux lanzado desde Docker Desktop en Windows
+        # (PowerShell no tiene el concepto de $TERM de Unix, y la pty
+        # que asigna Docker no siempre se detecta como terminal real
+        # desde adentro). Sin esto, Rich deja de refrescar el spinner
+        # en vivo y solo vuelca todo al final — indistinguible de un
+        # cuelgue real durante un scan largo.
+        self.console = Console(force_terminal=True)
 
     def run(self, command: str, output_dir: str) -> dict:
         """Ejecuta sqlmap como subprocess.
@@ -132,91 +141,82 @@ class SqlmapRunner:
                     else:
                         self.console.print(line)
             else:
-                # Estado compartido entre el loop que lee stdout (se
-                # BLOQUEA esperando cada línea) y el hilo "ticker" de
-                # abajo — necesario porque si sqlmap se queda varios
-                # minutos sin imprimir nada (probando payloads contra
-                # un target lento, por ejemplo), el loop principal no
-                # tiene ninguna oportunidad de refrescar el spinner, y
-                # se ve exactamente igual a un cuelgue real. El ticker
-                # actualiza el texto cada segundo de forma
-                # independiente para que siempre se vea que sigue vivo.
+                # IMPORTANTE: Rich's Live no está pensado para que dos
+                # hilos distintos le llamen .update() al mismo tiempo.
+                # Una versión anterior usaba un hilo "ticker" aparte
+                # para refrescar el tiempo transcurrido mientras el
+                # hilo principal esperaba (bloqueado) la próxima línea
+                # de sqlmap — eso causó un deadlock real: el spinner se
+                # congelaba en silencio (sin excepción, sin crash)
+                # mientras sqlmap seguía corriendo perfectamente de
+                # fondo (bug encontrado probando contra un target real
+                # y lento). La solución correcta es no usar un segundo
+                # hilo: con select() esperamos datos del pipe con
+                # timeout de 1s, todo desde el mismo hilo que tiene
+                # abierto el Live — así nunca hay dos hilos
+                # actualizándolo a la vez.
                 start_time = time.time()
-                state = {"status": current_status, "lines": 0, "vuln": False}
-                stop_ticker = threading.Event()
-                # live.update() se llama desde 2 hilos (este ticker +
-                # el loop principal que lee stdout) — sin este lock,
-                # una race condition entre ambos puede tirar una
-                # excepción no capturada dentro del hilo del ticker
-                # (daemon, sin logging) y matarlo en silencio, dejando
-                # el spinner congelado para siempre aunque sqlmap
-                # siga corriendo perfectamente de fondo (bug real
-                # encontrado probando contra un target lento real).
-                render_lock = threading.Lock()
+                lines_seen = 0
 
                 def _render_label():
                     elapsed = int(time.time() - start_time)
                     mins, secs = divmod(elapsed, 60)
                     elapsed_str = f"{mins}m {secs}s" if mins else f"{secs}s"
                     return (
-                        f"{state['status']} · {elapsed_str} transcurridos "
-                        f"· {state['lines']} líneas de sqlmap procesadas"
+                        f"{current_status} · {elapsed_str} transcurridos "
+                        f"· {lines_seen} líneas de sqlmap procesadas"
                     )
-
-                def _safe_update(live, renderable):
-                    try:
-                        with render_lock:
-                            live.update(renderable)
-                    except Exception as e:
-                        logger.debug(f"Error actualizando el spinner (ignorado): {e}")
-
-                def _tick(live):
-                    while not stop_ticker.wait(1.0):
-                        if not state["vuln"]:
-                            _safe_update(
-                                live,
-                                Spinner(
-                                    "dots",
-                                    text=Text(_render_label(), style="cyan"),
-                                ),
-                            )
 
                 with Live(
                     Spinner("dots", text=Text(_render_label(), style="cyan")),
                     console=self.console,
                     refresh_per_second=4,
                 ) as live:
-                    ticker_thread = threading.Thread(
-                        target=_tick, args=(live,), daemon=True,
-                    )
-                    ticker_thread.start()
+                    while True:
+                        ready, _, _ = select.select([process.stdout], [], [], 1.0)
 
-                    for line in process.stdout:
-                        line = line.rstrip()
-                        stdout_lines.append(line)
-                        state["lines"] += 1
-
-                        new_status = self._parse_progress(line)
-                        if new_status:
-                            state["status"] = new_status
-                            current_status = new_status
-                            if "identificada" in new_status:
-                                vuln_found = True
-                                state["vuln"] = True
-                                _safe_update(
-                                    live, Text(f"✅ {new_status}", style="bold green"),
-                                )
-                            else:
-                                _safe_update(
-                                    live,
+                        if not ready:
+                            # Sin línea nueva en este segundo — igual
+                            # refrescamos tiempo transcurrido para que
+                            # se vea que seguimos vivos, y chequeamos
+                            # si el proceso ya terminó mientras
+                            # esperábamos.
+                            if not vuln_found:
+                                live.update(
                                     Spinner(
                                         "dots",
                                         text=Text(_render_label(), style="cyan"),
-                                    ),
+                                    )
                                 )
+                            if process.poll() is not None:
+                                break
+                            continue
 
-                    stop_ticker.set()
-                    ticker_thread.join(timeout=2)
+                        line = process.stdout.readline()
+                        if line == "":
+                            break  # EOF real — sqlmap terminó
+
+                        line = line.rstrip()
+                        stdout_lines.append(line)
+                        lines_seen += 1
+
+                        new_status = self._parse_progress(line)
+                        if new_status:
+                            current_status = new_status
+                            if "identificada" in new_status:
+                                vuln_found = True
+                                live.update(
+                                    Text(f"✅ {new_status}", style="bold green")
+                                )
+                                continue
+
+                        if not vuln_found:
+                            live.update(
+                                Spinner(
+                                    "dots",
+                                    text=Text(_render_label(), style="cyan"),
+                                )
+                            )
 
             process.wait()
             stderr_thread.join(timeout=5)
