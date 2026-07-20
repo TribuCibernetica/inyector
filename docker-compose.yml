@@ -9,5 +9,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - INYECTOR_REPORTS_DIR=/app/reports
+      # Para --ai-assist (opcional). Se leen de un archivo .env en la
+      # raíz del proyecto (docker compose lo carga automáticamente) —
+      # nunca hardcodees la key acá. Ver README: "Asistente de IA".
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
     stdin_open: true
     tty: true

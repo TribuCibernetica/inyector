@@ -35,6 +35,8 @@ from inyector.intelligence.timing_calculator import TimingCalculator
 from inyector.intelligence.technique_selector import TechniqueSelector
 from inyector.intelligence.command_builder import CommandBuilder
 from inyector.intelligence.confidence_calibrator import ConfidenceCalibrator
+from inyector.intelligence.knowledge_base import KnowledgeBase
+from inyector.intelligence.payload_verifier import verify_payload
 from inyector.utils.session_store import SessionStore
 from inyector.executor.sqlmap_runner import SqlmapRunner
 from inyector.reporting.parser import SqlmapOutputParser
@@ -396,12 +398,20 @@ def _run_recon_phase(url, param, method, data, waf, session,
 @click.option("--resume", is_flag=True, default=False,
               help="Reusar el recon guardado de un scan anterior al mismo target "
                    "(evita repetir peticiones de WAF/Stack/ORM/GraphQL)")
+@click.option("--ai-assist", is_flag=True, default=False,
+              help="Si sqlmap no encuentra nada (o falla de forma ambigua), "
+                   "pedir una segunda opinión con IA (Gemini) para payloads "
+                   "avanzados/creativos específicos del stack detectado. "
+                   "Requiere GEMINI_API_KEY (ver README). Primero prueba "
+                   "técnicas ya aprendidas de scans anteriores — sin costo "
+                   "de API — antes de preguntarle a Gemini algo nuevo. "
+                   "OJO: manda datos del target a la API de Google.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Output detallado")
 @click.option("-q", "--quiet", is_flag=True, default=False, help="Solo resultados finales")
 def scan(url, param, method, data, cookie, header, stealth, fast,
          waf, technique, tamper, threads, level, risk, output_dir,
          report_format, graphql, nosql, websocket, no_sqlmap, proxy, tor,
-         crawl, resume, verbose, quiet):
+         crawl, resume, ai_assist, verbose, quiet):
     """Ejecuta un scan completo de SQL Injection."""
     show_banner()
     configure_logging(verbose=verbose, quiet=quiet)
@@ -637,6 +647,16 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
     enricher = ResultEnricher()
     enriched = enricher.enrich(parsed_results, recon_data)
 
+    # La fase de IA es una "segunda opinión" — solo tiene sentido
+    # cuando sqlmap NO confirmó nada (o terminó de forma ambigua). Si
+    # ya encontró la vulnerabilidad, preguntarle a Gemini sería gastar
+    # tokens sin necesidad.
+    if ai_assist and (not enriched.get("vulnerable") or scan_failed):
+        _run_ai_assist_phase(
+            url, session, param, recon_data, enriched,
+            execution_result, scan_failed, output_dir, console,
+        )
+
     # Generar reportes
     report_paths = _generate_reports(
         recon_data, enriched, output_dir, timestamp, report_format,
@@ -652,6 +672,145 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
     _show_summary_table(
         url, recon_data, enriched, timestamp, elapsed_time, scan_failed,
     )
+
+
+def _run_ai_assist_phase(
+    url, session, param, recon_data, enriched,
+    execution_result, scan_failed, output_dir, console,
+):
+    """Segunda opinión con IA cuando sqlmap no encontró nada o falló
+    de forma ambigua — con KnowledgeBase-first para no gastar tokens
+    en algo que ya sabemos que funciona contra un stack parecido.
+
+    Muta `enriched` in-place si confirma algo nuevo (agrega a
+    'vulnerabilities' y sube 'severity'/'severity_score').
+    """
+    console.print(
+        "[bold #00ff88][*] Fase de asistencia con IA...[/bold #00ff88]"
+    )
+
+    stack = recon_data.get("stack", {})
+    orm = recon_data.get("orm", {})
+    waf = recon_data.get("waf", {})
+    dbms = enriched.get("dbms", {})
+    fingerprint = KnowledgeBase.fingerprint(stack, orm, waf, dbms)
+    kb = KnowledgeBase(output_dir)
+
+    effective_param = param
+    if not effective_param:
+        injectable = recon_data.get("endpoints", {}).get("injectable_params", [])
+        effective_param = injectable[0]["name"] if injectable else None
+
+    if not effective_param:
+        console.print(
+            "  [yellow]→ No hay un parámetro claro para probar — se "
+            "omite la asistencia de IA[/yellow]\n"
+        )
+        return
+
+    already_tried = []
+    confirmed_findings = []
+
+    # 1. Conocimiento previo primero — gratis, sin llamar a Gemini.
+    known = kb.get_known_techniques(fingerprint)
+    if known:
+        console.print(
+            f"  [#00ff88]→[/] {len(known)} técnica(s) conocida(s) para "
+            f"este fingerprint ({fingerprint}) — probando antes de "
+            f"gastar tokens..."
+        )
+        for t in known:
+            already_tried.append(t["payload"])
+            result = verify_payload(
+                url, session, effective_param, t["payload"],
+            )
+            if result["confirmed"]:
+                console.print(
+                    f"  [bold red]→ Confirmado con conocimiento previo:[/bold red] "
+                    f"{t['payload']} ({result['signal']})"
+                )
+                kb.record_success(
+                    fingerprint, t["payload"], t.get("technique", "custom"),
+                    effective_param, t.get("reasoning", ""),
+                )
+                confirmed_findings.append({**t, **result})
+
+    # 2. Si nada conocido funcionó, recién ahí preguntarle a Gemini.
+    if not confirmed_findings:
+        try:
+            from inyector.intelligence.ai_assistant import AIAssistant
+            assistant = AIAssistant()
+        except ValueError as e:
+            if known:
+                console.print(f"  [dim]→ {e}[/dim]\n")
+            else:
+                console.print(
+                    f"  [yellow]→ {e}[/yellow]\n"
+                )
+            assistant = None
+
+        if assistant:
+            sample_response = ""
+            try:
+                sample_response = session.get(url, timeout=20).text
+            except requests.exceptions.RequestException:
+                pass
+
+            if scan_failed:
+                failure_reason = execution_result.get("failure_reason", "")
+                recovery = assistant.suggest_sqlmap_recovery(
+                    failure_reason, execution_result.get("stdout", ""),
+                    {"technique": None, "level": None, "risk": None},
+                )
+                if recovery.get("suggested_flags"):
+                    console.print(
+                        f"  [bold #00ff88]→[/] Gemini sugiere reintentar "
+                        f"sqlmap con: {' '.join(recovery['suggested_flags'])}\n"
+                        f"    [dim]{recovery.get('reasoning', '')}[/dim]"
+                    )
+
+            console.print("  [#00ff88]→[/] Pidiendo payloads avanzados a Gemini...")
+            suggestions = assistant.suggest_advanced_payloads(
+                stack, orm, waf, effective_param, sample_response, already_tried,
+            )
+            for s in suggestions:
+                result = verify_payload(url, session, effective_param, s["payload"])
+                if result["confirmed"]:
+                    console.print(
+                        f"  [bold red]→ CONFIRMADO por IA + verificación real:[/bold red] "
+                        f"{s['payload']} ({result['signal']})"
+                    )
+                    kb.record_success(
+                        fingerprint, s["payload"], s.get("technique", "custom"),
+                        s.get("injection_point", effective_param),
+                        s.get("reasoning", ""),
+                    )
+                    confirmed_findings.append({**s, **result})
+                else:
+                    logger.debug(f"Payload de IA no confirmado: {s['payload']}")
+
+    if confirmed_findings:
+        for f in confirmed_findings:
+            enriched.setdefault("vulnerabilities", []).append({
+                "parameter": f"{effective_param} (IA + verificación real)",
+                "type": f.get("signal", "custom"),
+                "title": f"Sugerido por asistencia de IA — {f.get('reasoning', '')}",
+                "payload": f["payload"],
+                "dbms": "", "dbms_version": "", "os": "",
+                "technique": f.get("technique", "custom"),
+                "severity": "CRÍTICO",
+                "severity_score": 9.0,
+            })
+        enriched["vulnerable"] = True
+        if enriched.get("severity_score", 0.0) < 9.0:
+            enriched["severity"] = "CRÍTICO"
+            enriched["severity_score"] = 9.0
+        console.print(
+            f"  [bold red]{len(confirmed_findings)} hallazgo(s) nuevo(s) "
+            f"confirmado(s) por la fase de IA[/bold red]\n"
+        )
+    else:
+        console.print("  [dim]→ Nada nuevo confirmado por la fase de IA[/dim]\n")
 
 
 def _generate_reports(

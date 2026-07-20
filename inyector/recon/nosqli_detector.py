@@ -28,6 +28,7 @@ from typing import Optional
 import requests
 
 from inyector.utils.logger import get_logger
+from inyector.utils.response_compare import responses_similar
 
 logger = get_logger(__name__)
 
@@ -354,15 +355,6 @@ class NoSQLiDetector:
             return None
 
     def _responses_similar(self, resp_a, resp_b) -> bool:
-        """Compara dos respuestas HTTP de forma tolerante (status +
-        longitud aproximada del body), igual que sqlmap compara
-        páginas para boolean-blind."""
-        if resp_a is None or resp_b is None:
-            return False
-        if resp_a.status_code != resp_b.status_code:
-            return False
-        len_a, len_b = len(resp_a.text), len(resp_b.text)
-        if len_a == 0 and len_b == 0:
-            return True
-        diff = abs(len_a - len_b)
-        return diff <= max(5, 0.02 * max(len_a, len_b))
+        """Compara dos respuestas HTTP de forma tolerante — ver
+        inyector.utils.response_compare (compartido con AIAssistant)."""
+        return responses_similar(resp_a, resp_b)
