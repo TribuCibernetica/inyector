@@ -1,6 +1,6 @@
 click==8.1.7
 requests==2.31.0
-httpx==0.26.0
+httpx==0.28.1
 beautifulsoup4==4.12.3
 rich==13.7.0
 jinja2==3.1.3
@@ -10,7 +10,7 @@ websocket-client==1.7.0
 urllib3==2.2.1
 fake-useragent==1.5.1
 colorama==0.4.6
-pydantic==2.6.1
+pydantic==2.13.4
 # Sin esto, requests/urllib3 no pueden decodificar respuestas con
 # Content-Encoding: br (Brotli) — muy común en sitios modernos detrás
 # de CDNs. response.text queda como binario sin decodificar, y TODOS
@@ -18,3 +18,7 @@ pydantic==2.6.1
 # Crawler) fallan en silencio contra esos sitios sin ningún error
 # visible (bug real encontrado probando contra preview.owasp-juice.shop).
 brotli==1.1.0
+# Asistente de IA opcional (--ai-assist). Solo se usa si el usuario
+# configura GEMINI_API_KEY — sin eso, el paquete queda instalado pero
+# nunca se importa ni se llama a ninguna API externa.
+google-genai==2.12.1

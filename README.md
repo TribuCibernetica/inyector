@@ -75,6 +75,26 @@ docker compose run inyector scan \
   --stealth
 ```
 
+### Explorar el sitio antes de escanear (SPAs, apps sin params en la URL)
+
+```bash
+docker compose run inyector scan \
+  -u "https://target.com/" \
+  --crawl \
+  --stealth
+```
+
+### Con asistente de IA (segunda opinión cuando sqlmap no encuentra nada)
+
+```bash
+docker compose run inyector scan \
+  -u "https://target.com/page?id=1" \
+  --ai-assist \
+  --stealth
+```
+
+Requiere una API key de Gemini configurada — ver [Asistente de IA (opcional)](#asistente-de-ia-opcional) más abajo.
+
 ### Solo reconocimiento (sin sqlmap)
 
 ```bash
@@ -128,6 +148,8 @@ start reports\scan_*.html      # Windows
 | `--format` | Formato: html, json, markdown, all | all |
 | `--graphql` | Activar módulo GraphQL | off |
 | `--nosql` | Activar detección de NoSQL injection (MongoDB): operator injection ($ne/$eq) y $where injection. sqlmap no soporta NoSQL, así que corre con motor propio | off |
+| `--crawl` | Explorar el sitio (links, forms, y rutas de API embebidas en JS) antes de escanear. Necesario cuando la URL no tiene parámetros propios, ej. la landing page de una SPA Angular/React/Vue | off |
+| `--ai-assist` | Segunda opinión con IA (Gemini) cuando sqlmap no encuentra nada. Requiere `GEMINI_API_KEY` — ver [Asistente de IA](#asistente-de-ia-opcional) | off |
 | `--resume` | Reusar el recon guardado de un scan anterior al mismo target (evita repetir WAF/Stack/ORM/GraphQL) | off |
 | `--no-sqlmap` | Solo reconocimiento | off |
 | `--proxy` | Proxy HTTP | — |
@@ -147,6 +169,68 @@ start reports\scan_*.html      # Windows
 | Reporte HTML ejecutivo | ❌ No | ✅ Dark theme |
 | Recomendaciones de remediación | ❌ No | ✅ Por ORM/Stack |
 | Zero-install (Docker) | ❌ No | ✅ Un comando |
+
+## Asistente de IA (opcional)
+
+`--ai-assist` le da al pipeline una "segunda opinión" cuando sqlmap
+(con la configuración estándar) no encuentra nada, o termina en un
+resultado ambiguo (ej. `target url content is not stable`, común en
+APIs que devuelven un JWT/timestamp distinto en cada respuesta). Usa
+[Gemini](https://ai.google.dev/) para sugerir payloads avanzados y
+específicos del stack/ORM detectado — pensados para cubrir el "long
+tail" de casos que normalmente solo un pentester experimentado
+probaría a mano (second-order injection, bypass específico de un ORM,
+contextos poco comunes como headers/cookies).
+
+**Es 100% opt-in.** Sin `--ai-assist`, o sin `GEMINI_API_KEY`
+configurada, inyector funciona exactamente igual que siempre — el
+pipeline determinista (WAF/tamper/técnica) nunca depende de esto.
+
+### Cómo funciona (y por qué no gasta tokens de más)
+
+1. **Memoria de técnicas aprendidas primero.** Antes de llamar a
+   Gemini, se consulta una base de conocimiento local
+   (`reports/.inyector_knowledge/`) por técnicas que ya se confirmaron
+   como exitosas contra un fingerprint de stack parecido (mismo
+   framework + ORM + WAF + DBMS, sin importar el dominio). Si hay algo
+   conocido, se prueba primero — gratis, sin llamar a la API.
+2. **Solo si nada conocido funciona**, se le pide a Gemini una
+   sugerencia nueva, con el contexto real del target (stack, ORM, WAF,
+   un fragmento de respuesta real).
+3. **Nada se reporta como hallazgo solo porque el modelo lo sugirió.**
+   Cada sugerencia se prueba contra el target real (firma de error de
+   BD, delay de tiempo, o cambio de comportamiento) antes de contar
+   como confirmada.
+4. **Lo que se confirma, se aprende.** Se guarda en la base de
+   conocimiento para la próxima vez que aparezca un stack parecido —
+   con el tiempo, cada vez se depende menos de la API.
+
+### Configuración
+
+1. Conseguí una API key gratuita en [Google AI Studio](https://aistudio.google.com/apikey).
+2. Copiá `.env.example` a `.env` y completá tu key:
+
+   ```bash
+   cp .env.example .env
+   # editá .env y pegá tu GEMINI_API_KEY
+   ```
+
+3. `.env` **nunca se sube a git** (ya está en `.gitignore`) — es tuyo, local.
+4. Usá `--ai-assist` en tu scan:
+
+   ```bash
+   docker compose run inyector scan -u "https://target.com/page?id=1" --ai-assist
+   ```
+
+### ⚠️ Antes de activarlo
+
+Con `--ai-assist`, se manda a la API de Gemini (Google): la URL del
+target, el stack/ORM/WAF detectado, y fragmentos de respuestas reales
+del sitio. Para la mayoría de pentests/CTFs/bug bounties autorizados
+esto no es un problema, pero es una decisión que el alcance de tu
+auditoría debería contemplar explícitamente — no es algo para activar
+por default sin pensarlo. El pipeline central (WAF/tamper/técnica)
+nunca manda nada a nadie, con o sin `--ai-assist`.
 
 ## Casos de uso
 
