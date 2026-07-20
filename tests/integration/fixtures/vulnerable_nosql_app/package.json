@@ -1,0 +1,9 @@
+{
+  "name": "vulnerable-nosql-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongodb": "^6.5.0"
+  }
+}
