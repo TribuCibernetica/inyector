@@ -19,9 +19,8 @@ El Crawler descubre esos endpoints de tres formas:
    significativa antes de proponerlas como candidatas a testear.
 """
 
-import json
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urljoin, urlparse, parse_qs
 
 import requests
@@ -43,12 +42,24 @@ class Crawler:
 
     COMMON_GET_PARAMS = ["q", "search", "id", "query", "term", "keyword"]
 
-    COMMON_JSON_BODIES = [
+    COMMON_JSON_BODIES: list[dict[str, Any]] = [
         {"email": "inyector@test.com", "password": "Test1234!"},
         {"username": "inyector", "password": "Test1234!"},
         {"query": "test"},
         {"id": 1},
     ]
+
+    # Qué cuerpos probar según el nombre de la ruta -- antes se
+    # probaban TODOS los cuerpos contra CUALQUIER ruta y se aceptaba
+    # el primero que no diera 404/405. Eso casi nunca filtraba nada:
+    # un endpoint protegido por auth responde 401/403 (no 404), así
+    # que terminaba etiquetando rutas sin ninguna relación con login
+    # (ej. '/api/Products', '/api/BasketItems') con parámetros
+    # email/password que ni siquiera procesan -- bug real encontrado
+    # contra Juice Shop, donde terminamos escaneando el endpoint de
+    # productos con "email" como si fuera el de login.
+    AUTH_HINTS = ["login", "auth", "signin", "session", "user", "account"]
+    SEARCH_HINTS = ["search", "query", "find"]
 
     # Rutas cuyo nombre sugiere que vale la pena priorizarlas (login,
     # búsqueda, etc. son los vectores clásicos de SQLi/NoSQLi).
@@ -91,8 +102,6 @@ class Crawler:
 
         pages_to_visit = [base_url]
 
-        base_page_failed = False
-
         while pages_to_visit and len(visited_pages) < max_pages:
             page_url = pages_to_visit.pop(0)
             if page_url in visited_pages:
@@ -108,7 +117,6 @@ class Crawler:
             html = self._fetch_text(page_url, session, timeout=30)
             if html is None:
                 if page_url == base_url:
-                    base_page_failed = True
                     logger.warning(
                         f"No se pudo cargar la página base ({page_url}) — "
                         f"el crawl NO es confiable, esto no significa que "
@@ -191,7 +199,7 @@ class Crawler:
         """Extrae <a href> same-origin, separando los que ya traen
         query string (candidatos directos) de los que hay que seguir
         crawleando."""
-        results = []
+        results: list[tuple[Optional[dict], Optional[str]]] = []
         for a in soup.find_all("a", href=True):
             href = a["href"].strip()
             if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
@@ -234,10 +242,19 @@ class Crawler:
             if not params:
                 continue
 
+            # Un <form> HTML manda application/x-www-form-urlencoded,
+            # tanto en GET como en POST -- nunca JSON (eso solo pasa si
+            # JS intercepta el submit con fetch/axios, lo cual se
+            # descubre por separado en _probe_api_paths). Bug real
+            # encontrado: forms POST se mandaban como json_body, y el
+            # backend PHP nunca poblaba $_POST con un body JSON, así
+            # que sqlmap probaba un parámetro que el código real nunca
+            # llegaba a procesar -- falso negativo total en un login
+            # con SQLi confirmada por SAST y manualmente.
             candidates.append({
                 "url": full_url, "method": method,
-                "params": params if method == "GET" else None,
-                "json_body": None if method == "GET" else params,
+                "params": params,
+                "json_body": None,
                 "source": "html_form",
             })
 
@@ -248,10 +265,11 @@ class Crawler:
         """Prueba rutas de API descubiertas en JS con parámetros
         comunes, para confirmar cuáles aceptan input antes de
         proponerlas (en vez de adivinar a ciegas)."""
-        found = []
+        found: list[dict[str, Any]] = []
 
         for path in api_paths:
             url = f"{origin}{path}"
+            path_lower = path.lower()
 
             # Candidato GET con cada parámetro común
             for param_name in self.COMMON_GET_PARAMS:
@@ -265,8 +283,19 @@ class Crawler:
                     })
                     break  # un param que responde ya alcanza para este path
 
-            # Candidato POST/JSON con cuerpos comunes
-            for body in self.COMMON_JSON_BODIES:
+            # Candidato POST/JSON — solo probamos cuerpos que tengan
+            # sentido semántico para esta ruta en particular.
+            if any(h in path_lower for h in self.AUTH_HINTS):
+                candidate_bodies = [
+                    b for b in self.COMMON_JSON_BODIES
+                    if "email" in b or "username" in b
+                ]
+            elif any(h in path_lower for h in self.SEARCH_HINTS):
+                candidate_bodies = [b for b in self.COMMON_JSON_BODIES if "query" in b]
+            else:
+                candidate_bodies = [b for b in self.COMMON_JSON_BODIES if "id" in b]
+
+            for body in candidate_bodies:
                 try:
                     response = session.post(url, json=body, timeout=15)
                 except requests.exceptions.RequestException:

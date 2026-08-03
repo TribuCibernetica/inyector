@@ -23,7 +23,7 @@ implementa NoSQLMap para MongoDB, el motor NoSQL más común de lejos):
 
 import json
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
@@ -71,7 +71,7 @@ class NoSQLiDetector:
             Diccionario con engine ('mongodb' | 'couchdb' | 'unknown')
             y evidence.
         """
-        resultado = {"engine": "unknown", "confidence": 0.0, "evidence": []}
+        resultado: dict[str, Any] = {"engine": "unknown", "confidence": 0.0, "evidence": []}
 
         try:
             from urllib.parse import urlparse
@@ -132,7 +132,7 @@ class NoSQLiDetector:
         Returns:
             Diccionario con vulnerable, vector, evidence y confidence.
         """
-        resultado = {
+        resultado: dict[str, Any] = {
             "vulnerable": False, "vector": None,
             "confidence": 0.0, "evidence": [],
         }
@@ -180,7 +180,7 @@ class NoSQLiDetector:
         Returns:
             Diccionario con vulnerable, technique, evidence, confidence.
         """
-        resultado = {
+        resultado: dict[str, Any] = {
             "vulnerable": False, "technique": None,
             "confidence": 0.0, "evidence": [],
         }

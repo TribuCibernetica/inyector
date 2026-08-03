@@ -4,7 +4,8 @@ Añade contexto, recomendaciones de remediación y
 niveles de severidad a los resultados del scan.
 """
 
-from typing import Optional
+from typing import Any
+
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -13,7 +14,7 @@ logger = get_logger(__name__)
 class ResultEnricher:
     """Enriquece los resultados del scan con contexto adicional."""
 
-    SEVERITY_MAP = {
+    SEVERITY_MAP: dict[str, dict[str, Any]] = {
         "B": {"level": "ALTO", "score": 8.0},
         "E": {"level": "CRÍTICO", "score": 9.5},
         "U": {"level": "CRÍTICO", "score": 9.8},
@@ -96,7 +97,7 @@ class ResultEnricher:
         """
         logger.info("Enriqueciendo resultados...")
 
-        enriched = {
+        enriched: dict[str, Any] = {
             **scan_results,
             "severity": "LIMPIO",
             "severity_score": 0.0,
@@ -106,7 +107,7 @@ class ResultEnricher:
         }
 
         if scan_results.get("vulnerable"):
-            max_severity = {"level": "BAJO", "score": 0.0}
+            max_severity: dict[str, Any] = {"level": "BAJO", "score": 0.0}
 
             for vuln in scan_results.get("vulnerabilities", []):
                 technique = vuln.get("technique", "")

@@ -46,6 +46,9 @@ class JSONReportGenerator:
                 "level": enriched_results.get("severity", "LIMPIO"),
                 "score": enriched_results.get("severity_score", 0.0),
             },
+            "scan_meta": {
+                "auto_escalated": enriched_results.get("auto_escalated", False),
+            },
             "reconnaissance": {
                 "waf": enriched_results.get("recon", {}).get("waf", {}),
                 "stack": enriched_results.get("recon", {}).get("stack", {}),
@@ -63,6 +66,7 @@ class JSONReportGenerator:
             ],
             "dbms": enriched_results.get("dbms", {}),
             "databases": enriched_results.get("databases", []),
+            "ai_assist": enriched_results.get("ai_assist", {}),
             "remediation": {
                 "specific": enriched_results.get("remediation", []),
                 "general": enriched_results.get("general_remediation", []),

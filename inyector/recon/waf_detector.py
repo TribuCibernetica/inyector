@@ -6,7 +6,7 @@ para identificar el WAF que protege al objetivo.
 
 import requests
 import time
-from typing import Optional
+from typing import Any
 from inyector.utils.logger import get_logger
 from inyector.utils.signatures import load_signatures
 
@@ -36,7 +36,7 @@ class WAFDetector:
         """
         logger.info("Iniciando detección de WAF...")
 
-        resultado = {
+        resultado: dict[str, Any] = {
             "waf": "none",
             "confidence": 0.0,
             "evidence": [],
@@ -95,7 +95,7 @@ class WAFDetector:
         Returns:
             Tupla con (nombre_waf, confianza, lista_evidencias).
         """
-        best_match = ("none", 0.0, [])
+        best_match: tuple[str, float, list[str]] = ("none", 0.0, [])
 
         for waf_name, signatures in self.WAF_SIGNATURES.items():
             confidence = 0.0

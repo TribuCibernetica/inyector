@@ -5,7 +5,7 @@ para identificar el lenguaje, framework y base de datos.
 """
 
 import requests
-from typing import Optional
+from typing import Any, Optional
 from inyector.utils.logger import get_logger
 from inyector.utils.url_probe import build_probe_url
 
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class StackDetector:
     """Detecta el stack tecnológico de la aplicación web objetivo."""
 
-    STACK_SIGNATURES = {
+    STACK_SIGNATURES: dict[str, dict[str, Any]] = {
         "php": {
             "language": "php",
             "framework": "PHP nativo",
@@ -141,7 +141,7 @@ class StackDetector:
         """
         logger.info("Iniciando detección de stack tecnológico...")
 
-        resultado = {
+        resultado: dict[str, Any] = {
             "language": "desconocido",
             "framework": "desconocido",
             "database_hints": [],

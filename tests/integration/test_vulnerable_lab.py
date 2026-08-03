@@ -19,7 +19,6 @@ disponible (ej. en un sandbox sin Docker).
 
 import json
 import os
-import shutil
 import subprocess
 import time
 

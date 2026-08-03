@@ -67,3 +67,47 @@ def test_url_is_included_and_shell_safe():
     tokens = shlex.split(command)
     assert "-u" in tokens
     assert tokens[tokens.index("-u") + 1] == "http://example.com/search?q=hello world"
+
+
+def test_safe_freq_always_comes_with_a_safe_url():
+    # Regresión real (UAEH): sqlmap ignora --safe-freq por completo si
+    # no viene acompañado de --safe-url -- la pausa periódica pensada
+    # para no verse como ráfaga de ataque nunca se activaba, aunque se
+    # detectara WAF y se calculara un safe_freq > 0.
+    config = _base_config(
+        url="http://sistemas.uaeh.edu.mx/sape/index.php",
+        timing={"delay": 2, "timeout": 30, "retries": 5, "safe_freq": 12},
+    )
+
+    command = CommandBuilder().build(config)
+    tokens = shlex.split(command)
+
+    assert "--safe-freq=12" in tokens
+    safe_url_flag = next(t for t in tokens if t.startswith("--safe-url="))
+    assert safe_url_flag == "--safe-url=http://sistemas.uaeh.edu.mx/"
+
+
+def test_modsecurity_waf_does_not_add_hex_incompatible_with_no_cast():
+    # Regresión real (UAEH): sqlmap rechaza la combinación de
+    # '--no-cast' (siempre presente) con '--hex' ("switch '--no-cast'
+    # is incompatible with switch '--hex'") -- el scan fallaba
+    # instantáneamente (exit code 1, 0 requests mandadas) en cualquier
+    # target detectado/forzado como modsecurity.
+    config = _base_config(waf={"waf": "modsecurity"})
+
+    command = CommandBuilder().build(config)
+    tokens = shlex.split(command)
+
+    assert "--no-cast" in tokens
+    assert "--hex" not in tokens
+
+
+def test_no_safe_url_added_when_safe_freq_is_zero():
+    config = _base_config(
+        timing={"delay": 1, "timeout": 30, "retries": 3, "safe_freq": 0},
+    )
+
+    command = CommandBuilder().build(config)
+
+    assert "--safe-freq" not in command
+    assert "--safe-url" not in command

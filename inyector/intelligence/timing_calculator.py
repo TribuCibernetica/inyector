@@ -8,7 +8,7 @@ del servidor y el WAF detectado.
 import time
 import statistics
 import requests
-from typing import Optional
+from typing import Any
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -108,7 +108,7 @@ class TimingCalculator:
             retries = 3
             safe_freq = 0
 
-        resultado = {
+        resultado: dict[str, Any] = {
             "delay": delay,
             "timeout": timeout,
             "retries": retries,

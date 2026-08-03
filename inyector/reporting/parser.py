@@ -6,8 +6,8 @@ de sqlmap: vulnerabilidades, DBMS, payloads, etc.
 
 import re
 import os
-import json
-from typing import Optional
+from typing import Any
+from urllib.parse import urlparse
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,19 +16,27 @@ logger = get_logger(__name__)
 class SqlmapOutputParser:
     """Parsea el output de sqlmap y extrae información estructurada."""
 
-    def parse(self, stdout: str, output_dir: str) -> dict:
+    def parse(self, stdout: str, output_dir: str, target_url: str = "") -> dict:
         """Parsea el output completo de sqlmap.
 
         Args:
             stdout: Output de texto de sqlmap.
-            output_dir: Directorio de output de sqlmap.
+            output_dir: Directorio de output de sqlmap (compartido
+                entre TODOS los targets escaneados alguna vez --
+                sqlmap crea un subdirectorio propio por hostname
+                debajo de este).
+            target_url: URL del target de ESTE scan. Se usa para
+                acotar `_merge_file_results` al subdirectorio de este
+                target -- sin esto, se mezclan hallazgos de scans
+                viejos contra sitios totalmente distintos (ver
+                docstring de `_merge_file_results`).
 
         Returns:
             Diccionario estructurado con todos los resultados.
         """
         logger.info("Parseando resultados de sqlmap...")
 
-        resultado = {
+        resultado: dict[str, Any] = {
             "vulnerable": False,
             "vulnerabilities": [],
             "databases": [],
@@ -73,7 +81,7 @@ class SqlmapOutputParser:
             resultado["injection_point"] = injection_match.group(1).strip()
 
         # Intentar leer resultados desde archivo de sqlmap
-        self._merge_file_results(resultado, output_dir)
+        self._merge_file_results(resultado, output_dir, target_url)
 
         if resultado["vulnerable"]:
             logger.info(
@@ -192,17 +200,42 @@ class SqlmapOutputParser:
 
         return dbms_info
 
-    def _merge_file_results(self, resultado: dict, output_dir: str) -> None:
+    def _merge_file_results(self, resultado: dict, output_dir: str,
+                             target_url: str = "") -> None:
         """Intenta leer y mergear resultados desde archivos de sqlmap.
+
+        `output_dir` es compartido entre TODOS los targets escaneados
+        alguna vez (por defecto `/app/reports`) -- sqlmap crea su
+        propio subdirectorio por hostname debajo de él (ej.
+        `reports/<hostname>/log`). Sin acotar la búsqueda a ese
+        subdirectorio, un `os.walk` sobre todo `output_dir` mezcla
+        hallazgos de scans anteriores contra sitios totalmente
+        distintos en el reporte de ESTE scan -- bug real encontrado:
+        un log viejo de un scan contra 'localhost' contaminó el
+        reporte de un scan posterior contra Juice Shop, reportando
+        una vulnerabilidad de MySQL que nunca existió ahí.
 
         Args:
             resultado: Diccionario de resultados actual.
             output_dir: Directorio de output de sqlmap.
+            target_url: URL del target de este scan -- si se pasa, la
+                búsqueda se acota a `output_dir/<hostname>/`. Sin
+                hostname disponible, se cae de vuelta al
+                comportamiento viejo (menos preciso, pero no rompe
+                nada) como último recurso.
         """
         if not os.path.isdir(output_dir):
             return
 
-        for root, dirs, files in os.walk(output_dir):
+        search_root = output_dir
+        if target_url:
+            hostname = urlparse(target_url).hostname
+            if hostname:
+                candidate = os.path.join(output_dir, hostname)
+                if os.path.isdir(candidate):
+                    search_root = candidate
+
+        for root, dirs, files in os.walk(search_root):
             for filename in files:
                 filepath = os.path.join(root, filename)
 

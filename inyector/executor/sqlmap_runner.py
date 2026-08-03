@@ -56,6 +56,20 @@ class SqlmapRunner:
         "connection reset by peer",
     ]
 
+    # Marcadores de que sqlmap SÍ corrió y SÍ concluyó, pero se saltó
+    # el parámetro real sin haberlo probado con ninguna técnica SQLi
+    # -- distinto de CONNECTION_FAILURE_MARKERS (que indican que ni
+    # siquiera pudo conectar). Bug real encontrado contra UT Tehuacán:
+    # con la config default (level 2/risk 1), sqlmap detectaba
+    # 'possible integer casting detected' en un parámetro numérico y
+    # lo saltaba automáticamente (--batch responde 'Y' a "skip those
+    # kind of cases"), concluyendo 'no vulnerable' en segundos sin
+    # haber probado nada realmente. Con --level 5 --risk 3 el mismo
+    # target sí corrió una batería completa de pruebas.
+    SHALLOW_SCAN_MARKERS = [
+        "possible integer casting detected",
+    ]
+
     def __init__(self, verbose: bool = False):
         """Inicializa el runner de sqlmap.
 
@@ -115,6 +129,11 @@ class SqlmapRunner:
                 bufsize=1,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
+            # Con stdout=PIPE/stderr=PIPE explícitos arriba, Popen
+            # siempre los abre — nunca quedan en None salvo que se
+            # llame a wait()/communicate() antes, que no es el caso.
+            assert process.stdout is not None
+            assert process.stderr is not None
 
             # Thread para capturar stderr
             def capture_stderr():
@@ -223,6 +242,7 @@ class SqlmapRunner:
 
             stdout_text = "\n".join(stdout_lines)
             failure_reason = self._detect_failure_reason(stdout_text)
+            failure_reason = self._reconcile_failure_reason(failure_reason, vuln_found)
 
             resultado["success"] = process.returncode == 0 and failure_reason is None
             resultado["exit_code"] = process.returncode
@@ -260,6 +280,32 @@ class SqlmapRunner:
         return resultado
 
     @classmethod
+    def _reconcile_failure_reason(
+        cls, failure_reason: Optional[str], vuln_found: bool,
+    ) -> Optional[str]:
+        """Descarta un marcador de fallo si sqlmap ya confirmó una
+        inyección real.
+
+        Un marcador de fallo (ej. "target url content is not stable")
+        en ALGÚN punto del log no invalida una inyección que sqlmap ya
+        confirmó -- bug real encontrado contra un target real: sqlmap
+        identificaba y confirmaba el parámetro 'id' como vulnerable
+        (time-based blind, severidad ALTO en el reporte), pero una
+        advertencia de estabilidad aparecida DESPUÉS en el mismo
+        output (ej. al seguir probando otras técnicas/parámetros)
+        hacía que el resultado final se reportara como 'DESCONOCIDO',
+        tapando un hallazgo crítico real ya confirmado.
+
+        Args:
+            failure_reason: Resultado de _detect_failure_reason, o None.
+            vuln_found: Si sqlmap ya identificó una inyección real.
+
+        Returns:
+            None si vuln_found es True, si no el failure_reason tal cual.
+        """
+        return None if vuln_found else failure_reason
+
+    @classmethod
     def _detect_failure_reason(cls, stdout_text: str) -> Optional[str]:
         """Busca marcadores de fallo real en el output de sqlmap.
 
@@ -276,6 +322,32 @@ class SqlmapRunner:
         return next(
             (
                 marker for marker in cls.CONNECTION_FAILURE_MARKERS
+                if marker in stdout_lower
+            ),
+            None,
+        )
+
+    @classmethod
+    def _detect_shallow_scan_reason(cls, stdout_text: str) -> Optional[str]:
+        """Busca marcadores de que sqlmap se saltó el parámetro real
+        sin probarlo con ninguna técnica SQLi (ver SHALLOW_SCAN_MARKERS).
+
+        Un 'no vulnerable' con uno de estos marcadores presente no es
+        del todo confiable con la config default -- vale la pena
+        reintentar una vez con --level/--risk más altos antes de
+        aceptarlo (ver _run_target_scan en cli.py).
+
+        Args:
+            stdout_text: Output completo (stdout) de sqlmap.
+
+        Returns:
+            El marcador encontrado, o None si no hay indicios de que
+            se haya saltado el parámetro.
+        """
+        stdout_lower = stdout_text.lower()
+        return next(
+            (
+                marker for marker in cls.SHALLOW_SCAN_MARKERS
                 if marker in stdout_lower
             ),
             None,

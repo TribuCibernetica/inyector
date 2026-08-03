@@ -6,8 +6,6 @@ body razonablemente parecida (no exacta, porque muchas páginas
 incluyen contenido dinámico irrelevante como timestamps o contadores).
 """
 
-from typing import Optional
-
 
 def responses_similar(resp_a, resp_b) -> bool:
     """Compara dos respuestas HTTP de forma tolerante.

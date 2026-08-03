@@ -5,7 +5,7 @@ y mapear la superficie de ataque.
 """
 
 from urllib.parse import urlparse, parse_qs, unquote_plus
-from typing import Optional
+from typing import Any, Optional
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -46,7 +46,7 @@ class EndpointMapper:
         flat_get = {k: v[0] if v else "" for k, v in params_get.items()}
         flat_post = {k: v[0] if v else "" for k, v in params_post.items()}
 
-        resultado = {
+        resultado: dict[str, Any] = {
             "base_url": f"{parsed.scheme}://{parsed.netloc}{parsed.path}",
             "full_url": url,
             "method": method.upper(),

@@ -5,7 +5,7 @@ mensajes de error provocados por payloads de sintaxis SQL inválida.
 """
 
 import requests
-from typing import Optional
+from typing import Any, Optional
 from inyector.utils.logger import get_logger
 from inyector.utils.url_probe import build_probe_url
 from inyector.utils.signatures import load_signatures
@@ -39,7 +39,7 @@ class ORMDetector:
         """
         logger.info("Iniciando detección de ORM...")
 
-        resultado = {
+        resultado: dict[str, Any] = {
             "orm": "none",
             "escape_hatches": [],
             "raw_queries_likely": False,
