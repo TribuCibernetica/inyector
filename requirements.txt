@@ -1,13 +1,13 @@
-click==8.1.7
-requests==2.31.0
+click==8.3.3
+requests==2.33.0
 httpx==0.28.1
 beautifulsoup4==4.12.3
 rich==13.7.0
-jinja2==3.1.3
+jinja2==3.1.6
 python-whois==0.9.4
 dnspython==2.6.1
 websocket-client==1.7.0
-urllib3==2.2.1
+urllib3==2.7.0
 fake-useragent==1.5.1
 colorama==0.4.6
 pydantic==2.13.4
@@ -17,7 +17,7 @@ pydantic==2.13.4
 # los detectores que buscan firmas por substring (WAF, Stack, ORM,
 # Crawler) fallan en silencio contra esos sitios sin ningún error
 # visible (bug real encontrado probando contra preview.owasp-juice.shop).
-brotli==1.1.0
+brotli==1.2.0
 # Asistente de IA opcional (--ai-assist). Solo se usa si el usuario
 # configura GEMINI_API_KEY — sin eso, el paquete queda instalado pero
 # nunca se importa ni se llama a ninguna API externa.
