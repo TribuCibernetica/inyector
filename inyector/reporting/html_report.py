@@ -110,6 +110,39 @@ class HTMLReportGenerator:
             {% endfor %}
         </div>
         {% endif %}
+        {% if ai_assist_used %}
+        <div class="section">
+            <h2 class="section-title">🤖 Asistencia de IA (Gemini)</h2>
+            <div class="card">
+                <div class="card-header"><h3>Fingerprint de stack</h3></div>
+                <table>
+                    <tr><th>Fingerprint</th><td><code class="inline">{{ ai_assist_fingerprint }}</code></td></tr>
+                    <tr><th>Bitácora completa</th><td><code class="inline">{{ ai_assist_log_path }}</code></td></tr>
+                </table>
+                {% if ai_assist_recovery and ai_assist_recovery.suggested_flags %}
+                <p style="margin-top: 12px;"><span style="color: var(--text-secondary); font-size: 0.85rem;">Flags de recovery sugeridos:</span> <code class="inline">{{ ai_assist_recovery.suggested_flags|join(' ') }}</code></p>
+                <p style="color: var(--text-dim); font-size: 0.85rem;">{{ ai_assist_recovery.reasoning }}</p>
+                {% endif %}
+            </div>
+            {% if ai_assist_tries %}
+            <div class="card">
+                <div class="card-header"><h3>Sugerencias evaluadas (confirmadas y rechazadas)</h3></div>
+                <table>
+                    <tr><th>Origen</th><th>Payload</th><th>Técnica</th><th>Confirmado</th><th>Razonamiento</th></tr>
+                    {% for t in ai_assist_tries %}
+                    <tr>
+                        <td>{{ t.source }}</td>
+                        <td><code class="inline">{{ t.payload }}</code></td>
+                        <td>{{ t.technique }}</td>
+                        <td>{{ "✅" if t.confirmed else "❌" }}</td>
+                        <td>{{ t.reasoning }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
         <div class="section">
             <h2 class="section-title">🔍 Reconocimiento</h2>
             <div class="card"><div class="card-header"><h3>WAF Fingerprinting</h3><span class="badge badge-info">{{ waf_name }}</span></div>
@@ -209,6 +242,14 @@ class HTMLReportGenerator:
             "graphql_injectable": graphql_data.get("injectable_args", []),
             "specific_remediation": enriched_results.get("remediation", []),
             "general_remediation": enriched_results.get("general_remediation", []),
+            "ai_assist_used": bool(enriched_results.get("ai_assist", {}).get("used")),
+            "ai_assist_fingerprint": enriched_results.get("ai_assist", {}).get("fingerprint", "N/A"),
+            "ai_assist_log_path": enriched_results.get("ai_assist", {}).get("audit_log_path", ""),
+            "ai_assist_recovery": enriched_results.get("ai_assist", {}).get("sqlmap_recovery"),
+            "ai_assist_tries": (
+                enriched_results.get("ai_assist", {}).get("known_techniques_tried", [])
+                + enriched_results.get("ai_assist", {}).get("gemini_suggestions", [])
+            ),
         }
 
         template = Template(self.HTML_TEMPLATE)

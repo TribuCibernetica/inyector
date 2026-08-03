@@ -1,0 +1,7 @@
+# Set de reglas acotado a errores reales (imports sin usar, variables
+# sin usar, nombres redefinidos, errores de sintaxis) en vez del set
+# extendido de reglas de estilo/modernización de ruff, que en un
+# repo de este tamaño generaría cientos de cambios cosméticos sin
+# relación con bugs reales.
+[lint]
+select = ["E4", "E7", "E9", "F"]

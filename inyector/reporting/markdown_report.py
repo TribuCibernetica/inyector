@@ -193,6 +193,48 @@ class MarkdownReportGenerator:
                 lines.append("- Sin NoSQL injection detectada")
             lines.append("")
 
+        # Asistencia de IA — historial completo (confirmado o no), no
+        # solo lo que terminó como hallazgo, para que las decisiones
+        # de Gemini queden auditables.
+        ai_assist = enriched_results.get("ai_assist")
+        if ai_assist and ai_assist.get("used"):
+            lines.append("## 🤖 Asistencia de IA (Gemini)")
+            lines.append("")
+            lines.append(
+                f"- **Fingerprint de stack:** `{ai_assist.get('fingerprint', 'N/A')}`"
+            )
+            lines.append(
+                f"- **Bitácora completa (prompts/respuestas crudas):** "
+                f"`{ai_assist.get('audit_log_path', '')}`"
+            )
+            recovery = ai_assist.get("sqlmap_recovery")
+            if recovery and recovery.get("suggested_flags"):
+                lines.append(
+                    f"- **Flags de recovery sugeridos:** "
+                    f"`{' '.join(recovery['suggested_flags'])}`"
+                )
+                if recovery.get("reasoning"):
+                    lines.append(f"  - _{recovery['reasoning']}_")
+            lines.append("")
+
+            tries = (
+                ai_assist.get("known_techniques_tried", [])
+                + ai_assist.get("gemini_suggestions", [])
+            )
+            if tries:
+                lines.append("| Origen | Payload | Técnica | Confirmado | Razonamiento |")
+                lines.append("|---|---|---|---|---|")
+                for t in tries:
+                    confirmed_mark = "✅" if t.get("confirmed") else "❌"
+                    payload_cell = str(t.get("payload", "")).replace("|", "\\|")
+                    reasoning_cell = str(t.get("reasoning", "")).replace("|", "\\|")
+                    lines.append(
+                        f"| {t.get('source', 'N/A')} | `{payload_cell}` | "
+                        f"{t.get('technique', 'N/A')} | {confirmed_mark} | "
+                        f"{reasoning_cell} |"
+                    )
+                lines.append("")
+
         # Remediación
         lines.append("## 🛡️ Recomendaciones de Remediación")
         lines.append("")
