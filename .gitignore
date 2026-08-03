@@ -10,3 +10,9 @@ build/
 .idea/
 reports/*
 !reports/.gitkeep
+
+# Capturas de tráfico real (HAR/pcap) — suelen contener cookies/tokens
+# de sesión de targets reales, nunca deben terminar en el repo.
+har/
+*.har
+*.pcap

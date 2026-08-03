@@ -95,6 +95,17 @@ docker compose run inyector scan \
 
 Requiere una API key de Gemini configurada — ver [Asistente de IA (opcional)](#asistente-de-ia-opcional) más abajo.
 
+### Múltiples targets desde un archivo
+
+```bash
+docker compose run inyector scan \
+  --targets-file /app/targets.txt \
+  --stealth --ai-assist --ai-max-calls 10
+```
+
+`targets.txt` es una URL por línea (`#` para comentarios). Al final se
+muestra una tabla consolidada, igual que con `--crawl-all`.
+
 ### Solo reconocimiento (sin sqlmap)
 
 ```bash
@@ -148,8 +159,13 @@ start reports\scan_*.html      # Windows
 | `--format` | Formato: html, json, markdown, all | all |
 | `--graphql` | Activar módulo GraphQL | off |
 | `--nosql` | Activar detección de NoSQL injection (MongoDB): operator injection ($ne/$eq) y $where injection. sqlmap no soporta NoSQL, así que corre con motor propio | off |
+| `--websocket` | Activar módulo WebSocket | off |
 | `--crawl` | Explorar el sitio (links, forms, y rutas de API embebidas en JS) antes de escanear. Necesario cuando la URL no tiene parámetros propios, ej. la landing page de una SPA Angular/React/Vue | off |
+| `--crawl-all` | Como `--crawl`, pero en vez de escanear solo el candidato de mayor prioridad, corre un scan completo (recon + sqlmap + IA + reporte) contra cada uno de los top `--crawl-all-limit` candidatos encontrados, uno por uno, y al final muestra una tabla consolidada + un JSON índice. Implica `--crawl` | off |
+| `--crawl-all-limit` | Cuántos candidatos del crawler escanear con `--crawl-all` (ordenados por prioridad) | 10 |
 | `--ai-assist` | Segunda opinión con IA (Gemini) cuando sqlmap no encuentra nada. Requiere `GEMINI_API_KEY` — ver [Asistente de IA](#asistente-de-ia-opcional) | off |
+| `--ai-max-calls` | Tope de llamadas a Gemini para toda la corrida (compartido entre todos los targets con `--crawl-all`/`--targets-file`). Sin esto, `--ai-assist` no tiene límite propio más allá de `--crawl-all-limit` | sin límite |
+| `--targets-file` | Archivo con una URL por línea (líneas vacías o `#` se ignoran) para escanear cada una por separado. No se puede combinar con `-u`/`--crawl-all` | — |
 | `--resume` | Reusar el recon guardado de un scan anterior al mismo target (evita repetir WAF/Stack/ORM/GraphQL) | off |
 | `--no-sqlmap` | Solo reconocimiento | off |
 | `--proxy` | Proxy HTTP | — |
@@ -204,6 +220,25 @@ pipeline determinista (WAF/tamper/técnica) nunca depende de esto.
 4. **Lo que se confirma, se aprende.** Se guarda en la base de
    conocimiento para la próxima vez que aparezca un stack parecido —
    con el tiempo, cada vez se depende menos de la API.
+
+### Visibilidad de las decisiones de la IA
+
+Nada de lo que decide Gemini queda oculto — ni siquiera lo que termina
+descartado:
+
+- **Consola:** cada sugerencia se imprime con su técnica, punto de
+  inyección y razonamiento, esté confirmada o no. Con `-v/--verbose`
+  también se ve el prompt exacto (contexto de stack/ORM/WAF y
+  fragmento de respuesta real) que se le mandó a Gemini.
+- **Bitácora en disco** (`reports/.inyector_knowledge/ai_decisions.jsonl`):
+  un registro JSON por línea de cada llamada a la API — prompt
+  completo, respuesta cruda, modelo usado, latencia, y error si lo
+  hubo. Es el registro auditable completo, independiente de lo que se
+  imprimió en consola.
+- **Reporte final** (HTML/JSON/Markdown): incluye una sección
+  "Asistencia de IA" con todas las sugerencias evaluadas —confirmadas
+  y rechazadas— junto a su razonamiento, no solo las que terminaron
+  siendo un hallazgo.
 
 ### Configuración
 
@@ -280,6 +315,22 @@ pytest tests/integration/ -v
 
 CI corre ambos automáticamente en cada push/PR (ver `.github/workflows/test.yml`).
 
+### Lint, type-check y secretos
+
+```bash
+ruff check inyector/ tests/
+mypy inyector/
+```
+
+CI también corre `gitleaks` (secret scanning) y `pip-audit` (CVEs en
+dependencias) en cada push/PR. Para correr gitleaks localmente antes
+de cada commit:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
 ## Contribuir
 
 1. Fork el repositorio
@@ -287,6 +338,10 @@ CI corre ambos automáticamente en cada push/PR (ver `.github/workflows/test.yml
 3. Commit: `git commit -am 'Agregar mi feature'`
 4. Push: `git push origin feature/mi-feature`
 5. Abre un Pull Request
+
+Cambios notables van a [CHANGELOG.md](CHANGELOG.md) (formato [Keep a
+Changelog](https://keepachangelog.com/es-ES/1.1.0/), versionado
+[semver](https://semver.org/lang/es/)).
 
 ## Créditos
 
