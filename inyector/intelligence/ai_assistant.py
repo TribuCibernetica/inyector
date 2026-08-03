@@ -25,10 +25,12 @@ aceptable para el alcance de su auditoría antes de usar --ai-assist.
 """
 
 import os
+import time
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from inyector.intelligence.ai_audit_log import AIAuditLog
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -86,17 +88,53 @@ class SqlmapRecovery(BaseModel):
     reasoning: str
 
 
+class AICallBudget:
+    """Tope compartido de llamadas a Gemini para toda la corrida.
+
+    Una sola instancia se comparte entre todos los targets de un
+    --crawl-all (o un único scan) -- sin esto, un --crawl-all con
+    muchos candidatos puede terminar llamando a la API decenas de
+    veces sin que el usuario haya decidido eso explícitamente. Con
+    max_calls=None el tope queda desactivado (comportamiento actual).
+    """
+
+    def __init__(self, max_calls: Optional[int] = None):
+        self.max_calls = max_calls
+        self.calls_made = 0
+
+    @property
+    def exhausted(self) -> bool:
+        return self.max_calls is not None and self.calls_made >= self.max_calls
+
+    def consume(self) -> None:
+        self.calls_made += 1
+
+
 class AIAssistant:
     """Wrapper del cliente de Gemini para sugerencias puntuales de SQLi."""
 
-    DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    # docker-compose.yml siempre define GEMINI_MODEL en el contenedor
+    # (aunque sea "" cuando el usuario no lo configuró) -- os.environ.get
+    # con default solo aplica cuando la variable está AUSENTE, no cuando
+    # está presente pero vacía, así que el "or" es necesario para no
+    # terminar mandándole a la API un modelo "" (esto rompía con un 404
+    # "Model '' not found").
+    DEFAULT_MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None,
+                 audit_log: Optional[AIAuditLog] = None,
+                 budget: Optional[AICallBudget] = None):
         """Inicializa el cliente de Gemini.
 
         Args:
             api_key: API key de Gemini. Si se omite, se busca en la
                 variable de entorno GEMINI_API_KEY.
+            audit_log: si se pasa, cada llamada (prompt completo,
+                respuesta cruda, latencia, error) queda registrada ahí
+                para poder auditar después qué decidió Gemini y por
+                qué — incluso las sugerencias que no se confirmaron.
+            budget: tope compartido de llamadas a la API (--ai-max-calls).
+                Si se omite, no hay límite.
 
         Raises:
             ValueError: si no hay API key disponible por ningún lado.
@@ -108,8 +146,31 @@ class AIAssistant:
                 "API key de Gemini (ver README: 'Asistente de IA (opcional)')"
             )
 
+        self._audit_log = audit_log
+        self._budget = budget
+
         from google import genai
         self._client = genai.Client(api_key=api_key)
+
+    def _check_budget(self, kind: str) -> bool:
+        """Devuelve True si todavía hay presupuesto para llamar a
+        Gemini. Si ya se agotó, deja constancia en la bitácora para
+        que quede tan auditable como cualquier otra decisión de IA."""
+        if self._budget is None or not self._budget.exhausted:
+            return True
+
+        logger.info(
+            f"Tope de llamadas a Gemini alcanzado (--ai-max-calls="
+            f"{self._budget.max_calls}) — se omite '{kind}'"
+        )
+        if self._audit_log:
+            self._audit_log.record(
+                kind=kind, model=self.DEFAULT_MODEL,
+                skipped_reason="ai_max_calls_exhausted",
+                calls_made=self._budget.calls_made,
+                max_calls=self._budget.max_calls,
+            )
+        return False
 
     def suggest_advanced_payloads(
         self, stack: dict, orm: dict, waf: dict,
@@ -140,6 +201,9 @@ class AIAssistant:
             arriba (esto es una sugerencia best-effort, no algo de lo
             que dependa el resto del pipeline).
         """
+        if not self._check_budget("suggest_advanced_payloads"):
+            return []
+
         already_tried = already_tried or []
 
         prompt = f"""Contexto del target:
@@ -163,24 +227,58 @@ second-order injection, bypass específico de este ORM, contextos poco
 comunes (headers, JSON anidado), o encodings que evadan el WAF
 detectado."""
 
+        logger.debug(f"[Gemini] Prompt enviado (suggest_advanced_payloads):\n{prompt}")
+        start = time.time()
+        if self._budget is not None:
+            self._budget.consume()
         try:
-            interaction = self._client.interactions.create(
+            from google.genai import types
+
+            response = self._client.models.generate_content(
                 model=self.DEFAULT_MODEL,
-                system_instruction=SYSTEM_INSTRUCTION,
-                input=prompt,
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": PayloadSuggestions.model_json_schema(),
-                },
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=PayloadSuggestions,
+                ),
             )
-            result = PayloadSuggestions.model_validate_json(interaction.output_text)
+            latency_ms = round((time.time() - start) * 1000, 1)
+            result = response.parsed
+            if not isinstance(result, PayloadSuggestions):
+                raise ValueError(
+                    f"Gemini no devolvió JSON validable contra el schema: "
+                    f"{(response.text or '')[:500]!r}"
+                )
             logger.info(
                 f"Gemini sugirió {len(result.suggestions)} payload(s) avanzado(s)"
             )
-            return [s.model_dump() for s in result.suggestions]
+            suggestions = [s.model_dump() for s in result.suggestions]
+            if self._audit_log:
+                self._audit_log.record(
+                    kind="suggest_advanced_payloads",
+                    model=self.DEFAULT_MODEL,
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    prompt=prompt,
+                    raw_response=response.text,
+                    suggestions=suggestions,
+                    latency_ms=latency_ms,
+                    error=None,
+                )
+            return suggestions
         except Exception as e:
             logger.warning(f"Gemini no pudo sugerir payloads (se omite): {e}")
+            if self._audit_log:
+                self._audit_log.record(
+                    kind="suggest_advanced_payloads",
+                    model=self.DEFAULT_MODEL,
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    prompt=prompt,
+                    raw_response=None,
+                    suggestions=[],
+                    latency_ms=round((time.time() - start) * 1000, 1),
+                    error=str(e),
+                )
             return []
 
     def suggest_sqlmap_recovery(self, failure_reason: str,
@@ -198,6 +296,9 @@ detectado."""
             Dict {suggested_flags: list[str], reasoning: str}. Listas
             vacías si la API falla.
         """
+        if not self._check_budget("suggest_sqlmap_recovery"):
+            return {"suggested_flags": [], "reasoning": ""}
+
         prompt = f"""sqlmap terminó con este problema: '{failure_reason}'
 
 Comando usado (resumen): técnica={scan_config.get('technique')}, \
@@ -215,19 +316,53 @@ respuesta varía por un token/timestamp dinámico, sugerí --string o
 del target, sugerí --level/--risk distintos o --technique más
 acotado."""
 
+        logger.debug(f"[Gemini] Prompt enviado (suggest_sqlmap_recovery):\n{prompt}")
+        start = time.time()
+        if self._budget is not None:
+            self._budget.consume()
         try:
-            interaction = self._client.interactions.create(
+            from google.genai import types
+
+            response = self._client.models.generate_content(
                 model=self.DEFAULT_MODEL,
-                system_instruction=SYSTEM_INSTRUCTION,
-                input=prompt,
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": SqlmapRecovery.model_json_schema(),
-                },
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=SqlmapRecovery,
+                ),
             )
-            result = SqlmapRecovery.model_validate_json(interaction.output_text)
-            return result.model_dump()
+            latency_ms = round((time.time() - start) * 1000, 1)
+            result = response.parsed
+            if not isinstance(result, SqlmapRecovery):
+                raise ValueError(
+                    f"Gemini no devolvió JSON validable contra el schema: "
+                    f"{(response.text or '')[:500]!r}"
+                )
+            recovery = result.model_dump()
+            if self._audit_log:
+                self._audit_log.record(
+                    kind="suggest_sqlmap_recovery",
+                    model=self.DEFAULT_MODEL,
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    prompt=prompt,
+                    raw_response=response.text,
+                    recovery=recovery,
+                    latency_ms=latency_ms,
+                    error=None,
+                )
+            return recovery
         except Exception as e:
             logger.warning(f"Gemini no pudo sugerir recovery (se omite): {e}")
+            if self._audit_log:
+                self._audit_log.record(
+                    kind="suggest_sqlmap_recovery",
+                    model=self.DEFAULT_MODEL,
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    prompt=prompt,
+                    raw_response=None,
+                    recovery=None,
+                    latency_ms=round((time.time() - start) * 1000, 1),
+                    error=str(e),
+                )
             return {"suggested_flags": [], "reasoning": ""}
