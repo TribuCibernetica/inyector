@@ -15,34 +15,49 @@ from inyector.intelligence.payload_verifier import verify_payload
 
 class FakeSession:
     """Sesión HTTP falsa: devuelve respuestas pre-programadas según
-    si la URL contiene el payload probado o no."""
+    si la URL contiene el payload probado o no.
+
+    Orden de llamadas que hace verify_payload cuando no se le pasa un
+    baseline ya calculado: 1) baseline (valor original), 2) payload de
+    test, 3) valor de control/ruido -- solo si (2) resultó "distinto"
+    al baseline. Por defecto el control se ve como el baseline (mismo
+    texto) para que los tests existentes, que no ejercitan el control
+    de ruido, sigan confirmando boolean-based como antes."""
 
     def __init__(self, baseline_text="normal", payload_response_text="normal",
-                 status_code=200, baseline_status_code=None):
+                 status_code=200, baseline_status_code=None,
+                 noise_response_text=None, noise_status_code=None):
         self.baseline_text = baseline_text
         self.payload_response_text = payload_response_text
         self.status_code = status_code
         self.baseline_status_code = (
             baseline_status_code if baseline_status_code is not None else status_code
         )
+        self.noise_response_text = (
+            noise_response_text if noise_response_text is not None else baseline_text
+        )
+        self.noise_status_code = (
+            noise_status_code if noise_status_code is not None
+            else self.baseline_status_code
+        )
         self.calls = []
         self.post_calls = []
 
+    def _response_for(self, index):
+        if index == 1:
+            return self.baseline_status_code, self.baseline_text
+        if index == 2:
+            return self.status_code, self.payload_response_text
+        return self.noise_status_code, self.noise_response_text
+
     def get(self, url, timeout=None):
         self.calls.append(url)
-        # Primera llamada = baseline (verify_payload la pide primero
-        # si no se le pasó una ya calculada); la segunda = la URL con
-        # el payload de test.
-        is_baseline = len(self.calls) == 1
-        text = self.baseline_text if is_baseline else self.payload_response_text
-        status = self.baseline_status_code if is_baseline else self.status_code
+        status, text = self._response_for(len(self.calls))
         return SimpleNamespace(status_code=status, text=text)
 
     def post(self, url, json=None, data=None, timeout=None):
         self.post_calls.append({"url": url, "json": json, "data": data})
-        is_baseline = len(self.post_calls) == 1
-        text = self.baseline_text if is_baseline else self.payload_response_text
-        status = self.baseline_status_code if is_baseline else self.status_code
+        status, text = self._response_for(len(self.post_calls))
         return SimpleNamespace(status_code=status, text=text)
 
 
@@ -129,7 +144,9 @@ def test_post_method_mutates_json_body_instead_of_query_string():
     )
 
     assert session.calls == []  # nunca se usó GET/query string
-    assert len(session.post_calls) == 2  # baseline + test, ambos POST
+    # baseline + payload + control de ruido, los 3 POST
+    assert len(session.post_calls) == 3
+    assert session.post_calls[0]["json"]["email"] == "x@x.com"  # baseline = valor real
     assert session.post_calls[1]["json"]["email"] == "' OR 1=1--"
     assert session.post_calls[1]["json"]["password"] == "y"  # resto del body intacto
     assert result["confirmed"] is True
@@ -153,7 +170,9 @@ def test_post_form_urlencoded_data_mutates_form_field_not_sent_as_json():
     )
 
     assert session.calls == []  # nunca se usó GET/query string
-    assert len(session.post_calls) == 2  # baseline + test, ambos POST
+    # baseline + payload + control de ruido, los 3 POST
+    assert len(session.post_calls) == 3
+    assert session.post_calls[0]["data"]["txtUsuario"] == "admin"  # baseline = valor real
     assert session.post_calls[1]["json"] is None  # no se mandó como JSON
     assert session.post_calls[1]["data"]["txtUsuario"] == "' OR 1=1--"
     assert session.post_calls[1]["data"]["hdnRol"] == "1"  # resto del body intacto
@@ -237,6 +256,43 @@ def test_error_signature_new_in_payload_response_is_still_confirmed():
 
     assert result["confirmed"] is True
     assert result["signal"] == "error_based"
+
+
+def test_baseline_uses_real_original_value_not_synthetic_probe():
+    """El baseline debe representar una request legítima -- mandar un
+    valor sintético ('baseline_probe') como email/id de prueba puede
+    disparar el mismo camino de "input inválido" que un payload SQL en
+    un endpoint con validación de formato, haciendo el baseline tan
+    poco representativo como lo que se está probando."""
+    session = FakeSession(baseline_text="ok", payload_response_text="ok")
+    verify_payload(
+        "http://example.com/page?id=1&other=x", session, "id", "1' OR '1'='1",
+    )
+    assert "id=1" in session.calls[0]
+    assert "baseline_probe" not in session.calls[0]
+
+
+def test_boolean_based_not_confirmed_when_noise_control_also_differs():
+    """Regresión real (www.uag.mx, endpoint de validación de email):
+    payloads de técnica error/union-probe que nunca dispararon una
+    firma de error de BD real se confirmaban como "boolean_based" solo
+    porque CUALQUIER valor con forma distinta al original (sea o no
+    SQL) hace que el validador de email responda distinto. Si un
+    control sin semántica SQL reproduce la misma diferencia que el
+    payload, no hay evidencia de que la condición SQL en sí haya hecho
+    algo -- no debe confirmarse."""
+    session = FakeSession(
+        baseline_text="<html>email valido, procesando...</html>" * 10,
+        payload_response_text="<html>formato de email invalido</html>",
+        noise_response_text="<html>formato de email invalido</html>",
+    )
+    result = verify_payload(
+        "http://example.com/api/emailValidacion.php?email=test@test.com",
+        session, "email", "1 ORDER BY 9999 -- -",
+    )
+
+    assert result["confirmed"] is False
+    assert result["signal"] == "inconclusive"
 
 
 def test_broken_baseline_is_not_used_as_reference():

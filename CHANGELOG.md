@@ -42,6 +42,20 @@ nada rompe compatibilidad) cuando se commitee y se taguee.
   `inyector.cli` para apuntar a la ubicación nueva).
 
 ### Corregido
+- `payload_verifier`: la confirmación boolean-based comparaba la
+  respuesta de un payload contra un baseline mandado con un valor
+  sintético (`baseline_probe`), y confirmaba con una sola comparación
+  sin control — bug real encontrado en `www.uag.mx` (endpoint de
+  validación de email): 4 payloads de técnicas error/union-probe que
+  nunca dispararon una firma de error de BD real se reportaron como
+  "confirmados" solo porque cualquier valor con forma distinta al
+  original hacía que el validador respondiera distinto; sqlmap, con
+  testing diferencial real, marcó el mismo parámetro como false
+  positive en el mismo run. Ahora el baseline usa el valor real
+  original del parámetro, y antes de confirmar boolean-based se prueba
+  un valor de control sin semántica SQL (misma forma/longitud que el
+  payload) — si el control reproduce la misma diferencia, no se
+  confirma (`signal: "inconclusive"`).
 - `setup.py` no tenía la mitad de las dependencias reales de
   `requirements.txt` — el path de instalación sin Docker
   (`pip install -e .`) quedaba roto.
