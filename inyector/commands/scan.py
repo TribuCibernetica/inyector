@@ -12,6 +12,7 @@ import os
 import time
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import click
 import requests
@@ -512,9 +513,21 @@ def _candidate_to_target(candidate: dict, cli_param):
                 f"{k}={v}" for k, v in candidate["params"].items()
             )
         else:
-            c_url = f"{c_url}?" + "&".join(
-                f"{k}={v}" for k, v in candidate["params"].items()
-            )
+            # Bug real encontrado (www.uat.edu.mx, SharePoint): para
+            # candidatos que vienen de un <a href> con query string
+            # propia (crawler.py:_extract_links), `c_url` YA trae esa
+            # query string completa y `params` es solo el mismo query
+            # ya parseado -- apendear "?k=v" de nuevo a ciegas producía
+            # una URL con dos '?' (ej. '...?Source=%2F?Source=/'), y
+            # ese engendro se mandaba tal cual a sqlmap como target real,
+            # rompiendo el valor real del parámetro que se iba a probar.
+            # Mergear contra la query existente (sin duplicar claves que
+            # ya estaban) cubre tanto ese caso como el de forms/rutas de
+            # API, donde `c_url` no trae query propia y esto simplemente
+            # la agrega.
+            parsed = urlparse(c_url)
+            merged_params = {**dict(parse_qsl(parsed.query)), **candidate["params"]}
+            c_url = urlunparse(parsed._replace(query=urlencode(merged_params)))
         c_param = c_param or next(iter(candidate["params"]), None)
 
     return (c_url, c_method, c_data, c_param)
