@@ -9,10 +9,11 @@ Esto es lo que separa "el LLM dijo que probablemente funcione" de
 "confirmamos que funciona".
 """
 
+import hashlib
 import json
 import time
 from typing import Optional
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlparse
 
 import requests
 
@@ -61,6 +62,41 @@ def _send(session: requests.Session, url: str, method: str,
     return session.get(test_url, timeout=timeout)
 
 
+def _original_value(url: str, method: str, param: str, data: Optional[str]) -> str:
+    """Valor real que trae `param` en la request original -- el baseline
+    debe representar una request legítima, no un input sintético
+    ('baseline_probe') que en muchos targets (ej. validadores de
+    formato) dispara el mismo camino de "input inválido" que el propio
+    payload, haciendo el baseline tan poco representativo como lo que
+    se está probando."""
+    if method.upper() == "POST" and data:
+        try:
+            body = json.loads(data)
+            if param in body:
+                return body[param]
+        except (TypeError, ValueError):
+            pass
+        form = dict(parse_qsl(data))
+        if param in form:
+            return form[param]
+        return "baseline_probe"
+
+    query = dict(parse_qsl(urlparse(url).query))
+    return query.get(param, "baseline_probe")
+
+
+def _noise_value(payload: str) -> str:
+    """Valor de control sin semántica SQL, de longitud parecida al
+    payload -- se usa para distinguir "el target reacciona a
+    cualquier input distinto/raro" (falso positivo boolean-based) de
+    "reacciona específicamente a esta condición SQL" (evidencia real).
+    Determinístico (mismo payload -> mismo ruido) para que los tests
+    sean reproducibles."""
+    digest = hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()
+    length = max(len(payload), 12)
+    return (digest * (length // len(digest) + 1))[:length]
+
+
 def verify_payload(
     url: str, session: requests.Session, param: str, payload: str,
     method: str = "GET", data: Optional[str] = None,
@@ -89,7 +125,8 @@ def verify_payload(
         try:
             start = time.time()
             baseline_response = _send(
-                session, url, method, param, "baseline_probe", data, 20,
+                session, url, method, param,
+                _original_value(url, method, param, data), data, 20,
             )
             baseline_elapsed = time.time() - start
         except requests.exceptions.RequestException as e:
@@ -180,9 +217,48 @@ def verify_payload(
         }
 
     if not responses_similar(baseline_response, response):
+        # Antes de confirmar, se prueba un valor de control sin
+        # semántica SQL (misma forma/longitud que el payload, pero sin
+        # comillas/palabras clave). Si ese control TAMBIÉN produce una
+        # respuesta distinta al baseline, el target simplemente
+        # reacciona a cualquier input raro/inválido (ej. un validador
+        # de formato de email) -- no es evidencia de que la condición
+        # SQL específica del payload haya alterado la query. Bug real
+        # encontrado (www.uag.mx): payloads de error/union-probe que
+        # nunca dispararon una firma de error real se confirmaban como
+        # "boolean_based" solo por mandar un valor con forma de email
+        # distinto al baseline -- sqlmap, con testing diferencial
+        # real, marcó el mismo parámetro como false positive.
+        try:
+            noise_response = _send(
+                session, url, method, param, _noise_value(payload), data, 30,
+            )
+        except requests.exceptions.RequestException:
+            noise_response = None
+
+        if noise_response is not None and not responses_similar(
+            baseline_response, noise_response,
+        ):
+            return {
+                "confirmed": False, "signal": "inconclusive",
+                "evidence": (
+                    "La respuesta cambió, pero un valor de control sin "
+                    "semántica SQL (misma forma que el payload) también "
+                    "cambia la respuesta de forma parecida -- el target "
+                    "reacciona a cualquier input distinto/inválido, no "
+                    "específicamente a esta condición SQL. No se "
+                    "confirma sin evidencia más fuerte (error-based o "
+                    "time-based)."
+                ),
+            }
+
         return {
             "confirmed": True, "signal": "boolean_based",
-            "evidence": "Respuesta significativamente distinta al baseline",
+            "evidence": (
+                "Respuesta significativamente distinta al baseline, y "
+                "un valor de control sin semántica SQL no reproduce esa "
+                "diferencia"
+            ),
         }
 
     return {"confirmed": False, "signal": "none", "evidence": ""}
