@@ -42,6 +42,18 @@ nada rompe compatibilidad) cuando se commitee y se taguee.
   `inyector.cli` para apuntar a la ubicación nueva).
 
 ### Corregido
+- `_candidate_to_target` (comando `scan`, flujo `--crawl`/`--crawl-all`):
+  para candidatos que vienen de un `<a href>` con query string propia
+  (`crawler.py:_extract_links`), `url` ya trae esa query completa y
+  `params` es el mismo query ya parseado — apendear `?k=v` de nuevo a
+  ciegas producía una URL con dos `?` (ej.
+  `...Authenticate.aspx?Source=%2F?Source=/`). Bug real encontrado en
+  `www.uat.edu.mx` (SharePoint): esa URL rota se mandaba tal cual a
+  sqlmap como target — el valor real del parámetro que se iba a
+  probar quedaba corrompido antes de empezar. Ahora se mergea contra
+  la query existente sin duplicar claves ya presentes; sigue
+  agregando params normalmente para candidatos de `<form>`/rutas de
+  API que no traen query propia.
 - `payload_verifier`: la confirmación boolean-based comparaba la
   respuesta de un payload contra un baseline mandado con un valor
   sintético (`baseline_probe`), y confirmaba con una sola comparación
