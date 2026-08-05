@@ -72,6 +72,45 @@ def test_database_hints_merge_signature_and_error_detection_without_duplicates()
     assert resultado["database_hints"].count("mysql") == 1
 
 
+def test_generic_security_header_alone_does_not_imply_django():
+    """Regresión real (www.uat.edu.mx en SharePoint/.NET, y
+    repository.uaeh.edu.mx en OJS/PHP): ambos ocultaban sus headers
+    reveladores del stack real pero mandaban 'X-Frame-Options:
+    SAMEORIGIN' (hardening genérico, no algo específico de Django), y
+    los dos se detectaban como 'Django' solo por eso."""
+    detector = StackDetector()
+    session = MagicMock()
+    session.get.side_effect = [
+        _response(headers={"X-Frame-Options": "SAMEORIGIN"},
+                   text="pagina sin ninguna firma reconocible"),
+        _response(text="sin errores de db"),
+    ]
+
+    resultado = detector.detect("http://x.com/?id=1", session)
+
+    assert resultado["framework"] != "Django"
+    assert resultado["language"] == "desconocido"
+
+
+def test_detects_django_by_cookies_without_header_signature():
+    """Las cookies csrftoken+sessionid siguen siendo suficientes para
+    detectar Django, incluso sin ninguna firma de headers."""
+    detector = StackDetector()
+    session = MagicMock()
+    cookie_csrf = MagicMock(name="csrftoken", value="abc")
+    cookie_csrf.name = "csrftoken"
+    cookie_session = MagicMock(name="sessionid", value="xyz")
+    cookie_session.name = "sessionid"
+    session.get.side_effect = [
+        _response(headers={}, text="", cookies=[cookie_csrf, cookie_session]),
+        _response(text="sin errores de db"),
+    ]
+
+    resultado = detector.detect("http://x.com/?id=1", session)
+
+    assert resultado["framework"] == "Django"
+
+
 def test_timeout_sets_error_field():
     import requests
     detector = StackDetector()
