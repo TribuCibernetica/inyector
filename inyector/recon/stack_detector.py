@@ -37,7 +37,17 @@ class StackDetector:
         "django": {
             "language": "python",
             "framework": "Django",
-            "headers": {"X-Frame-Options": ["SAMEORIGIN"]},
+            # Sin firma de headers: 'X-Frame-Options: SAMEORIGIN' lo pone
+            # Django por default, pero también IIS/SharePoint, Apache,
+            # nginx y cualquier stack con hardening básico -- no es
+            # discriminativo. Bug real encontrado en producción: targets
+            # que ocultan sus headers reveladores (X-Powered-By,
+            # X-AspNet-Version -- hardening común) pero mantienen ese
+            # header de seguridad genérico se detectaban como "Django"
+            # por default, incluyendo un SharePoint/.NET (www.uat.edu.mx)
+            # y un OJS/PHP (repository.uaeh.edu.mx). Las cookies y
+            # errores de abajo sí son específicos de Django.
+            "headers": {},
             "cookies": ["csrftoken", "sessionid"],
             "errors": ["DoesNotExist", "IntegrityError",
                        "django.db", "OperationalError",

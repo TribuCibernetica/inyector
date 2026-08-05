@@ -42,6 +42,17 @@ nada rompe compatibilidad) cuando se commitee y se taguee.
   `inyector.cli` para apuntar a la ubicación nueva).
 
 ### Corregido
+- `stack_detector`: la firma de Django incluía el header
+  `X-Frame-Options: SAMEORIGIN` (+3 puntos) — header que pone Django
+  por default, pero también IIS/SharePoint, Apache, nginx y
+  cualquier stack con hardening básico. No es discriminativo. Bug
+  real encontrado en dos targets seguidos (`www.uat.edu.mx` en
+  SharePoint/.NET y `repository.uaeh.edu.mx` en OJS/PHP): ambos
+  ocultaban sus headers reveladores del stack real (hardening común)
+  pero mantenían ese header genérico, y los dos se detectaban como
+  "Django" solo por eso. Se sacó esa firma de headers — Django ahora
+  se detecta solo por sus cookies (`csrftoken`/`sessionid`) y errores
+  específicos.
 - `_candidate_to_target` (comando `scan`, flujo `--crawl`/`--crawl-all`):
   para candidatos que vienen de un `<a href>` con query string propia
   (`crawler.py:_extract_links`), `url` ya trae esa query completa y
