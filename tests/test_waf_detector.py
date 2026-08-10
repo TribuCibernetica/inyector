@@ -94,6 +94,7 @@ def test_probing_detects_block_page_when_header_match_is_weak():
     session = MagicMock()
     session.get.side_effect = [
         _response(headers={}, text="pagina normal"),
+        _response(headers={}, text="pagina normal"),  # sondeo sinkhole: sin redirect
         _response(status_code=403, text=f"acceso bloqueado {block_sig}"),
     ]
 
@@ -108,6 +109,7 @@ def test_probing_unknown_waf_on_generic_block_status():
     session = MagicMock()
     session.get.side_effect = [
         _response(headers={}, text="pagina normal"),
+        _response(headers={}, text="pagina normal"),  # sondeo sinkhole: sin redirect
         _response(status_code=406, text="bloqueado sin firma reconocible"),
     ]
 
@@ -115,3 +117,44 @@ def test_probing_unknown_waf_on_generic_block_status():
 
     assert resultado["waf"] == "unknown"
     assert resultado["confidence"] == 0.5
+
+
+def test_probing_detects_keyword_sinkhole_redirect():
+    # itescam.edu.mx: keyword SQL bloqueada con un 302 a un dominio
+    # completamente ajeno al target, sin firma de vendor conocida y
+    # sin ninguno de los status codes de bloqueo directo (403/406/...).
+    detector = WAFDetector()
+    session = MagicMock()
+    session.get.side_effect = [
+        _response(headers={}, text="pagina normal"),
+        _response(
+            status_code=302,
+            headers={"Location": "https://noexiste.com.mx"},
+        ),
+    ]
+
+    resultado = detector.detect("http://x.com/?id=1", session)
+
+    assert resultado["waf"] == "keyword_sinkhole"
+    assert resultado["confidence"] == 0.8
+
+
+def test_redirect_to_same_host_is_not_treated_as_sinkhole():
+    # Un 302 legítimo (ej. a una página de login en el mismo dominio)
+    # no debe confundirse con el patrón de sinkhole.
+    detector = WAFDetector()
+    session = MagicMock()
+    session.get.side_effect = [
+        _response(headers={}, text="pagina normal"),
+        _response(
+            status_code=302,
+            headers={"Location": "http://x.com/login"},
+        ),
+        _response(status_code=200, text="pagina normal"),
+        _response(status_code=200, text="pagina normal"),  # timing probe
+        _response(status_code=200, text="pagina normal"),  # timing baseline
+    ]
+
+    resultado = detector.detect("http://x.com/?id=1", session)
+
+    assert resultado["waf"] != "keyword_sinkhole"

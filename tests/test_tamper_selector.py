@@ -30,3 +30,12 @@ def test_orm_extra_tampers_are_appended_without_duplicates():
     tampers = selector.select(waf="none", orm="django_orm")
     assert "space2comment" in tampers
     assert len(tampers) == len(set(tampers))
+
+
+def test_keyword_sinkhole_waf_includes_scalarfuncbypass():
+    # scalarfuncbypass resuelve lo que space2comment solo no puede:
+    # un SELECT bloqueado sin importar el delimitador (itescam.edu.mx).
+    selector = TamperSelector()
+    tampers = selector.select(waf="keyword_sinkhole")
+    assert "scalarfuncbypass" in tampers
+    assert "space2comment" in tampers

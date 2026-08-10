@@ -28,6 +28,12 @@ RUN echo '#!/bin/bash\npython3 /opt/sqlmap/sqlmap.py "$@"' \
     > /usr/local/bin/sqlmap && \
     chmod +x /usr/local/bin/sqlmap
 
+# Tamper scripts propios de inyector (evasión de WAF descubierta
+# manualmente contra un target real -- ver inyector/data/tampers/).
+# sqlmap los descubre por nombre de archivo en su carpeta tamper/
+# igual que los suyos, así que basta con copiarlos ahí.
+COPY inyector/data/tampers/*.py /opt/sqlmap/tamper/
+
 # Directorio de trabajo
 WORKDIR /app
 

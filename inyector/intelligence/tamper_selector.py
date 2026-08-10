@@ -98,9 +98,18 @@ class TamperSelector:
         "sitelock": [
             "equaltolike", "space2comment", "between", "charencode",
         ],
+        # WAF institucional sin firma de vendor conocida que bloquea
+        # SELECT/AND/OR por keyword+espacio con un 302 a un dominio
+        # ajeno en vez de un 403 (ver WAFDetector._probe_waf_behavior).
+        # scalarfuncbypass ataca la parte que space2comment solo no
+        # resuelve: SELECT bloqueado sin importar el delimitador --
+        # descubierto y confirmado a mano contra itescam.edu.mx.
+        "keyword_sinkhole": [
+            "space2comment", "scalarfuncbypass", "between", "randomcase",
+        ],
         "none": [],
         "unknown": [
-            "space2comment", "between", "randomcase",
+            "space2comment", "scalarfuncbypass", "between", "randomcase",
         ],
     }
 

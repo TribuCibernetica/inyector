@@ -7,6 +7,7 @@ para identificar el WAF que protege al objetivo.
 import requests
 import time
 from typing import Any
+from urllib.parse import urlparse
 from inyector.utils.logger import get_logger
 from inyector.utils.signatures import load_signatures
 
@@ -164,6 +165,30 @@ class WAFDetector:
             Tupla con (nombre_waf, confianza).
         """
         separator = "&" if "?" in url else "?"
+
+        # Sondeo de sinkhole-redirect: algunos WAFs institucionales
+        # (sin firma de vendor conocida -- confirmado manualmente
+        # contra itescam.edu.mx) no devuelven 403 ante una keyword SQL
+        # bloqueada, sino un 3xx hacia un dominio completamente ajeno
+        # al target. Los status codes de abajo (403/406/...) no lo
+        # detectan porque una redirección es 3xx, no un bloqueo
+        # directo -- por eso es un chequeo aparte, sin seguir el
+        # redirect (allow_redirects=False) para no depender de que ese
+        # dominio ajeno resuelva.
+        sinkhole_test_url = f"{url}{separator}waf_test_sqli=1 AND 1=1"
+        try:
+            redirect_resp = session.get(
+                sinkhole_test_url, timeout=30, allow_redirects=False,
+            )
+            location = redirect_resp.headers.get("Location", "")
+            if redirect_resp.status_code in (301, 302, 303, 307, 308) and location:
+                redirect_host = urlparse(location).netloc
+                target_host = urlparse(url).netloc
+                if redirect_host and redirect_host != target_host:
+                    return ("keyword_sinkhole", 0.8)
+        except requests.exceptions.RequestException:
+            pass
+
         test_url = f"{url}{separator}waf_test=%3Cscript%3Ealert%281%29%3C%2Fscript%3E"
 
         try:
