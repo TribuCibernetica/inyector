@@ -30,6 +30,21 @@ nada rompe compatibilidad) cuando se commitee y se taguee.
   la corrida (compartido entre targets con `--crawl-all`/`--targets-file`).
 - `--targets-file`: escanear una lista de URLs desde un archivo, una
   por línea.
+- Detección de WAF `keyword_sinkhole`: algunos WAFs institucionales sin
+  firma de vendor conocida bloquean una keyword SQL con un 302 hacia
+  un dominio completamente ajeno en vez de un 403 — un patrón que las
+  firmas de vendor y los status codes de bloqueo directo no cubrían.
+  Descubierto a mano contra `itescam.edu.mx`.
+- Tamper propio de sqlmap `scalarfuncbypass` (`inyector/data/tampers/`,
+  copiado a `/opt/sqlmap/tamper/` en el build de Docker): quita la
+  keyword `SELECT` cuando antecede directo a una función escalar sin
+  `FROM` (`DATABASE()`, `CURRENT_USER()`, `SUBSTRING()`...), para WAFs
+  que bloquean `SELECT` sin importar el delimitador —
+  `space2comment` solo no alcanza para ese caso. Se selecciona
+  automáticamente para WAF `unknown` y `keyword_sinkhole`. Generaliza
+  la técnica manual usada para confirmar y explotar la SQLi de
+  `itescam.edu.mx` (4 intentos automatizados con sqlmap habían fallado
+  ahí antes de esto).
 
 ### Cambiado
 - `cli.py` (~1500 líneas, todos los comandos en un solo archivo) se
