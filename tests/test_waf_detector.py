@@ -158,3 +158,25 @@ def test_redirect_to_same_host_is_not_treated_as_sinkhole():
     resultado = detector.detect("http://x.com/?id=1", session)
 
     assert resultado["waf"] != "keyword_sinkhole"
+
+
+def test_probing_detects_block_only_on_sleep_timing_payload():
+    # uttecam.edu.mx: 'AND 1=1' y hasta el payload XSS pasan con 200,
+    # pero la keyword 'SLEEP(' de la prueba de timing dispara un 403
+    # instantaneo (challenge JS anti-bot). Antes del fix, esta rama
+    # solo medía el tiempo transcurrido y nunca miraba el status code
+    # de esa respuesta puntual, así que el bloqueo pasaba
+    # desapercibido y el resultado quedaba en waf=none.
+    detector = WAFDetector()
+    session = MagicMock()
+    session.get.side_effect = [
+        _response(headers={}, text="pagina normal"),
+        _response(headers={}, text="pagina normal"),  # sondeo sinkhole: sin redirect
+        _response(status_code=200, text="pagina normal"),  # payload XSS: pasa
+        _response(status_code=403, text="bloqueado sin firma reconocible"),  # SLEEP(: bloqueado
+    ]
+
+    resultado = detector.detect("http://x.com/?id=1", session)
+
+    assert resultado["waf"] == "unknown"
+    assert resultado["confidence"] == 0.5

@@ -6,7 +6,7 @@ para identificar el WAF que protege al objetivo.
 
 import requests
 import time
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 from inyector.utils.logger import get_logger
 from inyector.utils.signatures import load_signatures
@@ -194,30 +194,30 @@ class WAFDetector:
         try:
             response = session.get(test_url, timeout=30, allow_redirects=True)
 
-            # Si responde 403, 406 o 501, hay un WAF activo
-            if response.status_code in [403, 406, 501, 418, 429]:
-                body_lower = response.text.lower()
+            blocked = self._classify_block_response(response)
+            if blocked:
+                return blocked
 
-                # Fingerprinting por body de la página de bloqueo,
-                # usando la misma base de firmas que _check_headers
-                # (campo block_page_signatures — términos más genéricos
-                # que solo son fiables cuando ya sabemos que estamos
-                # ante una página de bloqueo real).
-                for waf_name, signatures in self.WAF_SIGNATURES.items():
-                    for sig in signatures.get("block_page_signatures", []):
-                        if sig in body_lower:
-                            return (waf_name, 0.85)
-
-                # WAF genérico detectado pero no identificado
-                return ("unknown", 0.5)
-
-            # Medir timing con payload de SLEEP
+            # Medir timing con payload de SLEEP -- además de medir el
+            # delay, hay que revisar el status code de ESTA respuesta
+            # en particular: algunos WAFs (confirmado contra
+            # uttecam.edu.mx) dejan pasar 'AND 1=1' e incluso el
+            # payload XSS de arriba sin filtrar, pero bloquean la
+            # keyword 'SLEEP(' específicamente con un 403 instantáneo
+            # (challenge JS anti-bot, sin firma de vendor conocida).
+            # Sin este chequeo el bloqueo pasaba desapercibido: al ser
+            # una respuesta rápida (no hay delay real que medir), el
+            # código nunca miraba más allá del tiempo transcurrido.
             separator2 = "&" if "?" in url else "?"
             timing_url = f"{url}{separator2}timing_test=1%20AND%20SLEEP%280%29"
 
             start = time.time()
-            session.get(timing_url, timeout=30)
+            timing_resp = session.get(timing_url, timeout=30)
             elapsed = time.time() - start
+
+            blocked = self._classify_block_response(timing_resp)
+            if blocked:
+                return blocked
 
             normal_start = time.time()
             session.get(url, timeout=30)
@@ -232,3 +232,28 @@ class WAFDetector:
             pass
 
         return ("none", 0.0)
+
+    def _classify_block_response(
+        self, response: requests.Response,
+    ) -> Optional[tuple[str, float]]:
+        """Si la respuesta tiene status code de bloqueo (403/406/...),
+        intenta identificar el WAF por firma de body; si no matchea
+        ninguna firma conocida, igual reporta 'unknown'. Devuelve None
+        si la respuesta no parece un bloqueo.
+        """
+        if response.status_code not in (403, 406, 501, 418, 429):
+            return None
+
+        body_lower = response.text.lower()
+
+        # Fingerprinting por body de la página de bloqueo, usando la
+        # misma base de firmas que _check_headers (campo
+        # block_page_signatures — términos más genéricos que solo son
+        # fiables cuando ya sabemos que estamos ante una página de
+        # bloqueo real).
+        for waf_name, signatures in self.WAF_SIGNATURES.items():
+            for sig in signatures.get("block_page_signatures", []):
+                if sig in body_lower:
+                    return (waf_name, 0.85)
+
+        return ("unknown", 0.5)

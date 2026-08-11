@@ -12,6 +12,18 @@ funcionalidad nueva compatible hacia atrás, PATCH para fixes.
 Todavía no tagueado — se convierte en `1.1.0` (MINOR: solo agrega,
 nada rompe compatibilidad) cuando se commitee y se taguee.
 
+### Corregido
+- `WAFDetector._probe_waf_behavior` nunca revisaba el status code de
+  su propia prueba de timing (`SLEEP(0)`) — solo medía el tiempo de
+  respuesta. Bug real encontrado en `uttecam.edu.mx`: su WAF deja
+  pasar `AND 1=1` y hasta un payload XSS con 200 limpio, pero bloquea
+  la keyword `SLEEP(` específicamente con un 403 instantáneo (challenge
+  JS anti-bot) — al no haber delay que medir, el bloqueo pasaba
+  completamente desapercibido y el resultado quedaba en `waf=none`.
+  Se extrajo la lógica de clasificación de "página de bloqueo" a un
+  helper (`_classify_block_response`) reutilizado tanto por la prueba
+  XSS como por la de timing.
+
 ### Agregado
 - Tests unitarios para los módulos que no tenían ninguno: `waf_detector`,
   `stack_detector`, `orm_detector`, `graphql_detector`,
