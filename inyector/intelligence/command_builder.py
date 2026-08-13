@@ -59,8 +59,16 @@ class CommandBuilder:
             parts.append(f"--data={shlex.quote(data)}")
 
         # 4. Parámetro objetivo
+        # shlex.quote acá también: nombres de campo de ASP.NET WebForms
+        # (ej. 'ctl00$cphContenido$txtNoControl') traen '$' literales,
+        # que shell=True en sqlmap_runner.py expande como variable de
+        # entorno (vacía) si no van entre comillas simples. Sin el
+        # quote, sqlmap terminaba probando el param truncado 'ctl00'
+        # -- no existe en el POST real, así que sqlmap ni lo prueba y
+        # sale en segundos con 'no vulnerable' sin haber corrido nada
+        # (bug real encontrado contra cloud.teziutlan.tecnm.mx).
         if param:
-            parts.append(f"-p {param}")
+            parts.append(f"-p {shlex.quote(param)}")
 
         # 5. Técnica SQLi
         selected_technique = self._select_technique(waf, stealth, technique)
