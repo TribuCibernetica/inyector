@@ -13,6 +13,16 @@ Todavía no tagueado — se convierte en `1.1.0` (MINOR: solo agrega,
 nada rompe compatibilidad) cuando se commitee y se taguee.
 
 ### Corregido
+- `CommandBuilder.build` siempre agregaba `--threads`, aunque sqlmap
+  rechaza la combinación `--csrf-token` + `--threads` ("option
+  '--csrf-token' is incompatible with option '--threads'") — el scan
+  fallaba instantáneamente (exit code 1, 0 requests mandadas) en
+  cualquier target con un token CSRF wireado. Bug real encontrado
+  verificando en vivo la detección de CSRF contra
+  `tie.teziutlan.tecnm.mx` (Moodle). Ahora `--threads` se omite cuando
+  hay `csrf_token` (sqlmap default a 1 thread, que es lo correcto acá:
+  con threads > 1 el refresco del token podría pisarse entre requests
+  concurrentes).
 - `SqlmapRunner._detect_failure_reason` trataba la frase "target url
   content is not stable" como fallo fatal en cualquier parte del log,
   aunque sqlmap la recupera solo (marca el contenido dinámico, cambia
