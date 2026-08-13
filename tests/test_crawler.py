@@ -155,6 +155,65 @@ def test_post_form_yields_urlencoded_params_not_json_body():
     assert candidate["params"] == {
         "txtUsuario": "test", "txtContrasenya": "test", "hdnRol": "1",
     }
+    # "hdnRol" no es un nombre de campo CSRF conocido -- no-op explícito
+    # para el caso default (la gran mayoría de forms reales).
+    assert "csrf" not in candidate
+
+
+def test_detects_moodle_logintoken_as_csrf_field():
+    # Regresión real (tie.teziutlan.tecnm.mx): el 'logintoken' de
+    # Moodle es de un solo uso -- reusar el mismo valor en un segundo
+    # POST simplemente re-renderiza el form vacío sin procesar el
+    # login. sqlmap necesita --csrf-token/--csrf-url para refrescarlo
+    # antes de cada request.
+    html = '''
+    <form method="post" action="/m24/login/index.php">
+      <input type="hidden" name="anchor" value="">
+      <input type="hidden" name="logintoken" value="PECvIlw5H94akhqYpGX9uy8QDNjmLCSs">
+      <input type="text" name="username" value="">
+      <input type="password" name="password" value="">
+    </form>
+    '''
+    soup = BeautifulSoup(html, "html.parser")
+    crawler = Crawler()
+
+    candidates = crawler._extract_forms(
+        "https://tie.teziutlan.tecnm.mx/m24/login/index.php",
+        "https://tie.teziutlan.tecnm.mx", soup,
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["csrf"] == {
+        "field": "logintoken",
+        "url": "https://tie.teziutlan.tecnm.mx/m24/login/index.php",
+        "method": "GET",
+    }
+
+
+def test_prioritizes_viewstate_over_other_aspnet_webforms_fields():
+    # Regresión real (cloud.teziutlan.tecnm.mx): un form ASP.NET
+    # WebForms trae 3 campos dinámicos (__VIEWSTATE, __EVENTVALIDATION,
+    # __VIEWSTATEGENERATOR) pero sqlmap solo refresca UNO por corrida
+    # -- CSRF_FIELD_PRIORITY debe elegir siempre el mismo de forma
+    # determinística.
+    html = '''
+    <form method="post" action="./frmLogin.aspx">
+      <input type="hidden" name="__VIEWSTATE" value="abc123==">
+      <input type="hidden" name="__VIEWSTATEGENERATOR" value="44CFBAFC">
+      <input type="hidden" name="__EVENTVALIDATION" value="xyz789=">
+      <input name="ctl00$cphContenido$txtNoControl" value="">
+      <input type="password" name="ctl00$cphContenido$txtPassword" value="">
+    </form>
+    '''
+    soup = BeautifulSoup(html, "html.parser")
+    crawler = Crawler()
+
+    candidates = crawler._extract_forms(
+        "https://cloud.teziutlan.tecnm.mx/PrecargaWeb/webForms/frmLogin.aspx",
+        "https://cloud.teziutlan.tecnm.mx", soup,
+    )
+
+    assert candidates[0]["csrf"]["field"] == "__VIEWSTATE"
 
 
 def test_dedupe_removes_identical_candidates():

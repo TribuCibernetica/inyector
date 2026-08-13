@@ -55,6 +55,7 @@ class JSONReportGenerator:
                 "orm": enriched_results.get("recon", {}).get("orm", {}),
                 "graphql": enriched_results.get("recon", {}).get("graphql", {}),
                 "nosqli": enriched_results.get("recon", {}).get("nosqli", {}),
+                "csrf": enriched_results.get("recon", {}).get("csrf", {}),
                 "injectable_params": enriched_results.get("recon", {})
                     .get("endpoints", {}).get("injectable_params", []),
                 "consistency_notes": enriched_results.get("recon", {})

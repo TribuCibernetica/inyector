@@ -120,6 +120,45 @@ def test_aspnet_webforms_param_name_is_shell_safe():
     assert tokens[tokens.index("-p") + 1] == param
 
 
+def test_csrf_token_and_url_are_appended_when_present():
+    # Grounded en tie.teziutlan.tecnm.mx: el 'logintoken' de Moodle es
+    # de un solo uso -- sqlmap necesita --csrf-token/--csrf-url para
+    # refrescarlo antes de cada request en vez de mandar siempre el
+    # mismo valor capturado (que ya viene en --data como fallback para
+    # el primer request).
+    config = _base_config(
+        method="POST",
+        data="anchor=&logintoken=PLACEHOLDER&username=test&password=test",
+        param="username",
+        csrf_token="logintoken",
+        csrf_url="https://tie.teziutlan.tecnm.mx/m24/login/index.php",
+    )
+
+    command = CommandBuilder().build(config)
+    tokens = shlex.split(command)
+
+    assert "--csrf-token=logintoken" in tokens
+    assert (
+        "--csrf-url=https://tie.teziutlan.tecnm.mx/m24/login/index.php"
+        in tokens
+    )
+    assert "--csrf-method=GET" in tokens
+    # El valor estático capturado se deja igual en --data -- sqlmap lo
+    # necesita para armar el primer request antes de refrescarlo solo.
+    assert any(t.startswith("--data=") and "logintoken=PLACEHOLDER" in t
+               for t in tokens)
+
+
+def test_no_csrf_flags_when_csrf_token_absent():
+    # No-regresión: la config default (sin csrf_token) -- la inmensa
+    # mayoría de targets -- no debe cambiar de comportamiento.
+    command = CommandBuilder().build(_base_config())
+
+    assert "--csrf-token" not in command
+    assert "--csrf-url" not in command
+    assert "--csrf-method" not in command
+
+
 def test_no_safe_url_added_when_safe_freq_is_zero():
     config = _base_config(
         timing={"delay": 1, "timeout": 30, "retries": 3, "safe_freq": 0},

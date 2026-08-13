@@ -88,6 +88,46 @@ def test_corrupt_knowledge_file_is_ignored_not_crashed(tmp_path):
     assert kb.get_known_techniques("cualquier|cosa") == []
 
 
+def test_record_and_retrieve_csrf_field(tmp_path):
+    # Grounded en tie.teziutlan.tecnm.mx (Moodle logintoken).
+    kb = KnowledgeBase(str(tmp_path))
+    fp = "moodle|php|none|none|mysql"
+
+    kb.record_csrf_field(fp, "logintoken", "https://x.com/login/index.php")
+
+    assert kb.get_known_csrf_field(fp) == "logintoken"
+
+
+def test_recording_same_csrf_field_twice_increments_confirmations(tmp_path):
+    kb = KnowledgeBase(str(tmp_path))
+    fp = "aspnet|csharp|none|none|sqlserver"
+
+    kb.record_csrf_field(fp, "__VIEWSTATE", "https://x.com/login.aspx")
+    kb.record_csrf_field(fp, "__VIEWSTATE", "https://x.com/login.aspx")
+
+    known = kb._data[fp]["csrf_fields"]
+    assert len(known) == 1  # no se duplica
+    assert known[0]["confirmations"] == 2
+
+
+def test_get_known_csrf_field_returns_none_when_nothing_recorded(tmp_path):
+    kb = KnowledgeBase(str(tmp_path))
+    assert kb.get_known_csrf_field("stack_nunca_visto|x|x|x|x") is None
+
+
+def test_csrf_field_memory_is_independent_from_technique_memory(tmp_path):
+    # record_success y record_csrf_field comparten el mismo entry por
+    # fingerprint ("techniques" vs "csrf_fields") -- no deben pisarse.
+    kb = KnowledgeBase(str(tmp_path))
+    fp = "moodle|php|none|none|mysql"
+
+    kb.record_success(fp, "1' OR '1'='1", "B", "id")
+    kb.record_csrf_field(fp, "logintoken", "https://x.com/login/index.php")
+
+    assert len(kb.get_known_techniques(fp)) == 1
+    assert kb.get_known_csrf_field(fp) == "logintoken"
+
+
 def test_stats_reports_totals(tmp_path):
     kb = KnowledgeBase(str(tmp_path))
     kb.record_success("fp1", "payload1", "B", "id")

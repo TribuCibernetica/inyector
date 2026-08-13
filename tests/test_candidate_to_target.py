@@ -24,13 +24,14 @@ def test_html_link_candidate_does_not_duplicate_existing_query_string():
         "source": "html_link",
     }
 
-    url, method, data, param = _candidate_to_target(candidate, None)
+    url, method, data, param, csrf = _candidate_to_target(candidate, None)
 
     assert url.count("?") == 1
     assert url == "https://x.com/_layouts/15/Authenticate.aspx?Source=%2F"
     assert method == "GET"
     assert data is None
     assert param == "Source"
+    assert csrf is None
 
 
 def test_form_candidate_without_query_string_gets_params_appended():
@@ -44,7 +45,7 @@ def test_form_candidate_without_query_string_gets_params_appended():
         "source": "html_form",
     }
 
-    url, method, data, param = _candidate_to_target(candidate, None)
+    url, method, data, param, csrf = _candidate_to_target(candidate, None)
 
     assert url == "https://x.com/search?q=test"
     assert param == "q"
@@ -62,7 +63,7 @@ def test_html_link_candidate_merges_extra_params_without_losing_existing_query()
         "source": "html_link",
     }
 
-    url, method, data, param = _candidate_to_target(candidate, None)
+    url, method, data, param, csrf = _candidate_to_target(candidate, None)
 
     assert "existing=1" in url
     assert "extra=2" in url
@@ -78,7 +79,7 @@ def test_post_form_candidate_uses_data_body_not_query_string():
         "source": "html_form",
     }
 
-    url, method, data, param = _candidate_to_target(candidate, None)
+    url, method, data, param, csrf = _candidate_to_target(candidate, None)
 
     assert url == "https://x.com/login"
     assert data == "user=admin&pass=x"
@@ -94,7 +95,7 @@ def test_json_body_candidate_untouched():
         "source": "js_api_path",
     }
 
-    url, method, data, param = _candidate_to_target(candidate, None)
+    url, method, data, param, csrf = _candidate_to_target(candidate, None)
 
     assert url == "https://x.com/api/users"
     assert data == '{"id": 1}'
@@ -110,6 +111,32 @@ def test_cli_param_takes_priority_over_crawler_detected_param():
         "source": "html_form",
     }
 
-    _, _, _, param = _candidate_to_target(candidate, "forced_param")
+    _, _, _, param, _ = _candidate_to_target(candidate, "forced_param")
 
     assert param == "forced_param"
+
+
+def test_candidate_with_csrf_field_propagates_it_unchanged():
+    # Grounded en tie.teziutlan.tecnm.mx -- lo que Crawler._extract_forms
+    # agrega cuando detecta un hidden field de CSRF_FIELD_PRIORITY debe
+    # llegar intacto al 5to elemento de la tupla.
+    candidate = {
+        "url": "https://tie.teziutlan.tecnm.mx/m24/login/index.php",
+        "method": "POST",
+        "params": {"logintoken": "abc123", "username": "test", "password": "test"},
+        "json_body": None,
+        "source": "html_form",
+        "csrf": {
+            "field": "logintoken",
+            "url": "https://tie.teziutlan.tecnm.mx/m24/login/index.php",
+            "method": "GET",
+        },
+    }
+
+    _, _, _, _, csrf = _candidate_to_target(candidate, None)
+
+    assert csrf == {
+        "field": "logintoken",
+        "url": "https://tie.teziutlan.tecnm.mx/m24/login/index.php",
+        "method": "GET",
+    }

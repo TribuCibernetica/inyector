@@ -50,6 +50,32 @@ nada rompe compatibilidad) cuando se commitee y se taguee.
   XSS como por la de timing.
 
 ### Agregado
+- Detección automática de tokens anti-CSRF/dinámicos (`__VIEWSTATE`,
+  `__EVENTVALIDATION`, `__RequestVerificationToken`, `csrfmiddlewaretoken`,
+  `authenticity_token`, `csrf_token`, `_token`, `logintoken`, `sesskey`)
+  en los `<form>` que descubre `--crawl`/`--crawl-all`, y wireado
+  automático de `--csrf-token`/`--csrf-url`/`--csrf-method` en el
+  comando sqlmap para que se refresquen antes de CADA request en vez
+  de mandar siempre el mismo valor capturado una sola vez. Nuevo flag
+  `--csrf-field`/`--csrf-url` para el flujo sin `--crawl` (cuando
+  `-u`/`--data` se arman a mano). `KnowledgeBase` aprende qué campo
+  funcionó por stack fingerprint (`record_csrf_field`/
+  `get_known_csrf_field`) para sugerirlo en scans futuros contra otro
+  target del mismo stack — solo como sugerencia en consola, nunca se
+  auto-aplica.
+
+  Motivado por dos casos reales: el `logintoken` de Moodle
+  (`tie.teziutlan.tecnm.mx`) es de un solo uso — reusar un valor viejo
+  re-renderiza el form vacío sin procesar el login, así que sin esto
+  sqlmap no puede testear el endpoint en absoluto; el
+  `__VIEWSTATE`/`__EVENTVALIDATION` de ASP.NET WebForms
+  (`cloud.teziutlan.tecnm.mx`) se regenera en cada respuesta, lo cual
+  confunde el check de estabilidad de sqlmap. Verificado empíricamente
+  que sqlmap ya soporta refrescar estos tokens con `--csrf-token`/
+  `--csrf-url` (no hacía falta un motor de testeo manual nuevo) —
+  corriendo sqlmap directo contra el login de Moodle con estos flags,
+  mandó ~10 valores de `logintoken` distintos y reales a lo largo del
+  scan, uno por request.
 - Tests unitarios para los módulos que no tenían ninguno: `waf_detector`,
   `stack_detector`, `orm_detector`, `graphql_detector`,
   `technique_selector`, `timing_calculator`, `enricher`, los tres
