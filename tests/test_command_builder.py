@@ -102,6 +102,24 @@ def test_modsecurity_waf_does_not_add_hex_incompatible_with_no_cast():
     assert "--hex" not in tokens
 
 
+def test_aspnet_webforms_param_name_is_shell_safe():
+    # Regresión real (cloud.teziutlan.tecnm.mx): nombres de campo de
+    # ASP.NET WebForms como 'ctl00$cphContenido$txtNoControl' traen '$'
+    # literales. Sin shlex.quote, shell=True (en sqlmap_runner.py)
+    # expandía '$cphContenido' y '$txtNoControl' como variables de
+    # entorno vacías, truncando el param a 'ctl00' -- sqlmap no
+    # encontraba ese nombre en el POST real y terminaba en segundos
+    # con 'no vulnerable' sin haber probado nada.
+    param = "ctl00$cphContenido$txtNoControl"
+    config = _base_config(param=param)
+
+    command = CommandBuilder().build(config)
+    tokens = shlex.split(command)
+
+    assert "-p" in tokens
+    assert tokens[tokens.index("-p") + 1] == param
+
+
 def test_no_safe_url_added_when_safe_freq_is_zero():
     config = _base_config(
         timing={"delay": 1, "timeout": 30, "retries": 3, "safe_freq": 0},

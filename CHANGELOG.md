@@ -13,6 +13,16 @@ Todavía no tagueado — se convierte en `1.1.0` (MINOR: solo agrega,
 nada rompe compatibilidad) cuando se commitee y se taguee.
 
 ### Corregido
+- `CommandBuilder.build` armaba `-p {param}` sin pasar por `shlex.quote`,
+  a diferencia de todos los demás campos del comando (`url`, `data`,
+  `cookie`, headers, proxy). Como `SqlmapRunner.run` ejecuta el comando
+  final con `shell=True`, un nombre de parámetro con `$` literal —como
+  `ctl00$cphContenido$txtNoControl`, la convención de nombrado de
+  ASP.NET WebForms— se expandía como variable de entorno (vacía),
+  truncando el parámetro real a `ctl00`. sqlmap no encontraba ese
+  nombre en el POST real y terminaba en segundos reportando "no
+  vulnerable" sin haber probado nada. Bug real encontrado contra
+  `cloud.teziutlan.tecnm.mx` (login WebForms `frmLogin.aspx`).
 - `WAFDetector._probe_waf_behavior` nunca revisaba el status code de
   su propia prueba de timing (`SLEEP(0)`) — solo medía el tiempo de
   respuesta. Bug real encontrado en `uttecam.edu.mx`: su WAF deja
