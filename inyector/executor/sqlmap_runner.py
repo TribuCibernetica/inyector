@@ -49,11 +49,35 @@ class SqlmapRunner:
     CONNECTION_FAILURE_MARKERS = [
         "unable to connect to the target url",
         "unable to connect to the target",
-        "target url content is not stable",
         "no parameter(s) found for testing",
         "connection timed out",
         "temporary failure in name resolution",
         "connection reset by peer",
+    ]
+
+    # Marcador de inestabilidad que sqlmap normalmente RECUPERA solo:
+    # marca el contenido dinámico, cambia a comparación por
+    # secuencia/texto, y sigue probando la inyección real -- no es un
+    # marcador de fallo duro como los de arriba. Bug real encontrado
+    # contra cloud.teziutlan.tecnm.mx (login WebForms, VIEWSTATE/
+    # EVENTVALIDATION que se regeneran en cada respuesta): un scan de
+    # 9+ minutos con sqlmap probando técnicas reales de verdad y
+    # concluyendo 'does not seem to be injectable' (confirmado
+    # corriendo sqlmap directo, sin el wrapper, contra el mismo
+    # request exacto) se reportaba igual que un target inalcanzable
+    # ('DESCONOCIDO, no confiar en NO') solo porque esta frase apareció
+    # en algún punto del log. Solo es un fallo real si sqlmap NUNCA
+    # llegó a probar el parámetro después de la advertencia (ver
+    # REAL_TESTING_MARKERS).
+    RECOVERABLE_INSTABILITY_MARKERS = [
+        "target url content is not stable",
+    ]
+
+    # Evidencia de que sqlmap sí llegó a testear el parámetro con
+    # técnicas reales después de una advertencia de inestabilidad (no
+    # se quedó trabado en el heurístico inicial).
+    REAL_TESTING_MARKERS = [
+        "testing for sql injection on",
     ]
 
     # Marcadores de que sqlmap SÍ corrió y SÍ concluyó, pero se saltó
@@ -319,13 +343,32 @@ class SqlmapRunner:
             El marcador encontrado, o None si no hay indicios de fallo.
         """
         stdout_lower = stdout_text.lower()
-        return next(
+
+        hard_failure = next(
             (
                 marker for marker in cls.CONNECTION_FAILURE_MARKERS
                 if marker in stdout_lower
             ),
             None,
         )
+        if hard_failure:
+            return hard_failure
+
+        real_testing_happened = any(
+            marker in stdout_lower for marker in cls.REAL_TESTING_MARKERS
+        )
+        if not real_testing_happened:
+            recoverable = next(
+                (
+                    marker for marker in cls.RECOVERABLE_INSTABILITY_MARKERS
+                    if marker in stdout_lower
+                ),
+                None,
+            )
+            if recoverable:
+                return recoverable
+
+        return None
 
     @classmethod
     def _detect_shallow_scan_reason(cls, stdout_text: str) -> Optional[str]:
