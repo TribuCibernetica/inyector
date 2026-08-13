@@ -13,6 +13,21 @@ Todavía no tagueado — se convierte en `1.1.0` (MINOR: solo agrega,
 nada rompe compatibilidad) cuando se commitee y se taguee.
 
 ### Corregido
+- `SqlmapRunner._detect_failure_reason` trataba la frase "target url
+  content is not stable" como fallo fatal en cualquier parte del log,
+  aunque sqlmap la recupera solo (marca el contenido dinámico, cambia
+  a comparación por texto) y sigue probando la inyección real. Bug
+  real encontrado contra `cloud.teziutlan.tecnm.mx` (login WebForms,
+  cuyo VIEWSTATE/EVENTVALIDATION se regeneran en cada respuesta): un
+  scan de 9+ minutos que corrió sqlmap de verdad y concluyó
+  legítimamente "no vulnerable" se reportaba igual que un target
+  inalcanzable ("DESCONOCIDO, no confiar en NO"), solo porque esa
+  frase aparecía en algún punto del log. Confirmado corriendo sqlmap
+  directo (sin el wrapper) contra el mismo request exacto: terminó un
+  boolean-based blind real. Ahora ese marcador solo cuenta como fallo
+  si el log nunca llega a "testing for sql injection on ..." después
+  de la advertencia — si sqlmap sí probó el parámetro, el resultado se
+  confía igual que cualquier otro scan limpio.
 - `CommandBuilder.build` armaba `-p {param}` sin pasar por `shlex.quote`,
   a diferencia de todos los demás campos del comando (`url`, `data`,
   `cookie`, headers, proxy). Como `SqlmapRunner.run` ejecuta el comando

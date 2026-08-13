@@ -92,6 +92,43 @@ def test_detects_shallow_scan_from_integer_casting_skip():
     assert reason == "possible integer casting detected"
 
 
+def test_recovered_instability_warning_with_real_testing_is_not_a_failure():
+    # Regresión real (cloud.teziutlan.tecnm.mx, login WebForms): el
+    # VIEWSTATE/EVENTVALIDATION se regeneran en cada respuesta, así que
+    # sqlmap SIEMPRE imprime 'target url content is not stable' contra
+    # este target -- pero lo recupera solo (marca contenido dinámico,
+    # cambia a comparación por texto) y sigue probando de verdad.
+    # Confirmado corriendo sqlmap directo (sin el wrapper) contra el
+    # mismo request exacto que un scan de inyector había marcado
+    # 'DESCONOCIDO': un scan real de 9+ minutos terminó en
+    # 'does not seem to be injectable', no en una falla de conexión.
+    # Antes de este fix, la sola presencia de la frase de inestabilidad
+    # tapaba ese resultado real y correcto.
+    stdout = """
+[19:37:48] [WARNING] target URL content is not stable (i.e. content differs). sqlmap will base the page comparison on a sequence matcher.
+[19:37:49] [INFO] dynamic content marked for removal (12 regions)
+[19:37:56] [WARNING] target URL content appears to be too dynamic. Switching to '--text-only'
+[19:37:57] [INFO] testing for SQL injection on POST parameter 'ctl00$cphContenido$txtNoControl'
+[19:37:57] [INFO] testing 'AND boolean-based blind - WHERE or HAVING clause'
+[19:38:38] [WARNING] POST parameter 'ctl00$cphContenido$txtNoControl' does not seem to be injectable
+[19:38:38] [ERROR] all tested parameters do not appear to be injectable
+"""
+    assert SqlmapRunner._detect_failure_reason(stdout) is None
+
+
+def test_instability_warning_without_real_testing_is_still_a_failure():
+    # El otro lado de la regresión de arriba: si la advertencia de
+    # inestabilidad aparece pero sqlmap NUNCA llega a probar el
+    # parámetro real (sin la línea 'testing for sql injection on'),
+    # sigue siendo un fallo real -- no hay que confiar en el 'NO'.
+    stdout = """
+[19:37:48] [WARNING] target URL content is not stable (i.e. content differs).
+[19:37:49] [CRITICAL] target URL content appears to be heavily dynamic, sqlmap is going to retry the request(s)
+"""
+    reason = SqlmapRunner._detect_failure_reason(stdout)
+    assert reason == "target url content is not stable"
+
+
 def test_normal_clean_scan_has_no_shallow_scan_reason():
     reason = SqlmapRunner._detect_shallow_scan_reason(
         "[18:40:33] [WARNING] POST parameter 'query' does not seem to "
