@@ -149,6 +149,22 @@ def test_csrf_token_and_url_are_appended_when_present():
                for t in tokens)
 
 
+def test_csrf_token_omits_threads_flag():
+    # Regresión real (tie.teziutlan.tecnm.mx): sqlmap rechaza la
+    # combinación '--csrf-token' + '--threads' ("option '--csrf-token'
+    # is incompatible with option '--threads'") -- el scan fallaba
+    # instantáneamente (exit code 1, 0 requests mandadas) en CUALQUIER
+    # target con un token CSRF wireado, sin importar si era realmente
+    # inyectable o no.
+    config = _base_config(csrf_token="logintoken", threads=5)
+
+    command = CommandBuilder().build(config)
+    tokens = shlex.split(command)
+
+    assert "--csrf-token=logintoken" in tokens
+    assert not any(t.startswith("--threads=") for t in tokens)
+
+
 def test_no_csrf_flags_when_csrf_token_absent():
     # No-regresión: la config default (sin csrf_token) -- la inmensa
     # mayoría de targets -- no debe cambiar de comportamiento.

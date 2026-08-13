@@ -137,7 +137,17 @@ class CommandBuilder:
         parts.append(f"--risk={risk}")
 
         # 12. Threads
-        parts.append(f"--threads={threads}")
+        # sqlmap rechaza la combinación de '--csrf-token' con '--threads'
+        # ("option '--csrf-token' is incompatible with option '--threads'")
+        # -- bug real encontrado contra tie.teziutlan.tecnm.mx (Moodle):
+        # el scan fallaba instantáneamente (exit code 1, 0 requests
+        # mandadas) en cualquier target con token CSRF wireado. Tiene
+        # sentido además del lado de sqlmap: con threads > 1 el refresco
+        # del token podría pisarse entre requests concurrentes. Omitir
+        # el flag deja a sqlmap en su default (1 thread), que es lo
+        # correcto acá de todos modos.
+        if not csrf_token:
+            parts.append(f"--threads={threads}")
 
         # 13. Output
         parts.append(f"--output-dir={output_dir}")
