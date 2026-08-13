@@ -107,6 +107,41 @@ class KnowledgeBase:
             f"Técnica aprendida y guardada para fingerprint '{fingerprint_key}'"
         )
 
+    def record_csrf_field(self, fingerprint_key: str, field: str,
+                           url_pattern: str) -> None:
+        """Registra el campo CSRF/token dinámico usado con éxito (scan
+        real, no necesariamente SQLi confirmada) contra este
+        fingerprint -- señal INFORMATIVA para scans futuros contra
+        OTRO target del mismo stack (ver get_known_csrf_field). No
+        autoritativa: la detección en vivo del form real crawleado
+        siempre gana si difiere -- dos targets del mismo stack pueden
+        nombrar su campo distinto.
+        """
+        entry = self._data.setdefault(fingerprint_key, {"techniques": []})
+        known = entry.setdefault("csrf_fields", [])
+
+        for c in known:
+            if c["field"] == field:
+                c["confirmations"] = c.get("confirmations", 1) + 1
+                self._save()
+                return
+
+        known.append({
+            "field": field,
+            "url_pattern": url_pattern,
+            "confirmations": 1,
+        })
+        self._save()
+
+    def get_known_csrf_field(self, fingerprint_key: str) -> Optional[str]:
+        """Campo CSRF más confirmado para este fingerprint, si hay
+        alguno -- solo para mostrar como sugerencia en consola/reporte,
+        NUNCA se auto-aplica a scan_config."""
+        known = self._data.get(fingerprint_key, {}).get("csrf_fields", [])
+        if not known:
+            return None
+        return max(known, key=lambda c: c.get("confirmations", 1))["field"]
+
     def stats(self) -> dict:
         """Resumen de cuánto aprendió la knowledge base hasta ahora."""
         total_techniques = sum(

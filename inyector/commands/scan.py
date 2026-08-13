@@ -341,13 +341,27 @@ def _run_recon_phase(url, param, method, data, waf, session,
                    "separado, igual que --crawl-all pero con una lista fija "
                    "de targets en vez de candidatos descubiertos por el "
                    "crawler. No se puede combinar con -u/--crawl-all.")
+@click.option("--csrf-field", default=None,
+              help="Nombre de campo (hidden input) anti-CSRF/token dinámico "
+                   "a refrescar antes de CADA request que manda sqlmap (ej. "
+                   "'__VIEWSTATE', 'logintoken', 'csrfmiddlewaretoken') -- "
+                   "sqlmap vuelve a leerlo de --csrf-url en cada request en "
+                   "vez de mandar siempre el mismo valor capturado una sola "
+                   "vez. Útil sin --crawl, cuando -u/--data se arman a mano "
+                   "(con --crawl/--crawl-all la detección es automática, "
+                   "pero este flag la sobreescribe igual para todos los "
+                   "targets del run si se pasa explícitamente).")
+@click.option("--csrf-url", default=None,
+              help="URL de donde releer --csrf-field antes de cada request "
+                   "(default: la misma -u/--url del target). Ignorado sin "
+                   "--csrf-field.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Output detallado")
 @click.option("-q", "--quiet", is_flag=True, default=False, help="Solo resultados finales")
 def scan(url, param, method, data, cookie, header, stealth, fast,
          waf, technique, tamper, threads, level, risk, output_dir,
          report_format, graphql, nosql, websocket, no_sqlmap, proxy, tor,
          crawl, crawl_all, crawl_all_limit, resume, ai_assist, ai_max_calls,
-         targets_file, verbose, quiet):
+         targets_file, csrf_field, csrf_url, verbose, quiet):
     """Ejecuta un scan completo de SQL Injection."""
     common.show_banner()
     configure_logging(verbose=verbose, quiet=quiet)
@@ -400,7 +414,7 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
     session = common.create_session(cookie=cookie, headers=list(header), proxy=proxy)
 
     if targets_file:
-        targets = [(t_url, method, data, param) for t_url in file_target_urls]
+        targets = [(t_url, method, data, param, None) for t_url in file_target_urls]
         common.console.print(
             f"[bold #00ff88][*] --targets-file: escaneando "
             f"{len(targets)} target(s) desde '{targets_file}'...[/bold #00ff88]\n"
@@ -454,7 +468,17 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
                 f"    [bold]{best_target[1]} {best_target[0]}[/bold]\n"
             )
         else:
-            targets = [(url, method, data, param)]
+            targets = [(url, method, data, param, None)]
+
+    # --csrf-field explícito sobreescribe la detección automática (si la
+    # hubo) para TODOS los targets de este run -- el usuario lo pidió
+    # a propósito, así que aplica parejo.
+    if csrf_field:
+        targets = [
+            (t_url, t_method, t_data, t_param,
+             {"field": csrf_field, "url": csrf_url or t_url, "method": "GET"})
+            for (t_url, t_method, t_data, t_param, _) in targets
+        ]
 
     # Presupuesto de llamadas a Gemini compartido entre TODOS los
     # targets de esta corrida (--crawl-all/--targets-file incluidos) —
@@ -471,7 +495,7 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
 
     multi = len(targets) > 1
     results = []
-    for i, (t_url, t_method, t_data, t_param) in enumerate(targets, start=1):
+    for i, (t_url, t_method, t_data, t_param, t_csrf) in enumerate(targets, start=1):
         if multi:
             common.console.print(
                 f"\n[bold #00ff88]══════ Target {i}/{len(targets)}: "
@@ -479,7 +503,7 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
             )
         results.append(_run_target_scan(
             t_url, t_param, t_method, t_data, cookie, header, session,
-            opts, common.console,
+            opts, common.console, csrf=t_csrf,
         ))
 
     if multi:
@@ -487,17 +511,21 @@ def scan(url, param, method, data, cookie, header, stealth, fast,
 
 
 def _candidate_to_target(candidate: dict, cli_param):
-    """Convierte un candidato del crawler en (url, method, data, param)
+    """Convierte un candidato del crawler en (url, method, data, param, csrf)
     listo para pasarle a _run_target_scan.
 
     Args:
         candidate: Un dict de Crawler().crawl() -- 'url', 'method', y
-            'params' o 'json_body'.
+            'params' o 'json_body', y opcionalmente 'csrf' si el
+            crawler detectó un hidden field de anti-CSRF/token dinámico
+            (ver Crawler.CSRF_FIELD_PRIORITY).
         cli_param: El -p explícito del usuario, si lo hay -- tiene
             prioridad sobre el parámetro que detectó el crawler.
 
     Returns:
-        Tupla (url, method, data, param).
+        Tupla (url, method, data, param, csrf) -- csrf es el dict
+        {"field", "url", "method"} del candidato, o None si no se
+        detectó ninguno.
     """
     c_url = candidate["url"]
     c_method = candidate["method"]
@@ -530,11 +558,11 @@ def _candidate_to_target(candidate: dict, cli_param):
             c_url = urlunparse(parsed._replace(query=urlencode(merged_params)))
         c_param = c_param or next(iter(candidate["params"]), None)
 
-    return (c_url, c_method, c_data, c_param)
+    return (c_url, c_method, c_data, c_param, candidate.get("csrf"))
 
 
 def _run_target_scan(url, param, method, data, cookie, header, session,
-                      opts: dict, console) -> dict:
+                      opts: dict, console, csrf: Optional[dict] = None) -> dict:
     """Corre el flujo completo (recon → inteligencia → ejecución → IA →
     reporte) contra UN target puntual.
 
@@ -542,7 +570,12 @@ def _run_target_scan(url, param, method, data, cookie, header, session,
     candidato con --crawl-all, además del caso normal de un solo
     target. `opts` trae las opciones que NO varían entre targets de un
     mismo invocation (nivel, risk, WAF forzado, etc.) -- solo
-    url/param/method/data cambian por iteración.
+    url/param/method/data/csrf cambian por iteración.
+
+    Args:
+        csrf: {"field", "url", "method"} si se detectó (o pasó a mano
+            con --csrf-field) un token anti-CSRF/dinámico a refrescar
+            antes de cada request de sqlmap, o None.
 
     Returns:
         Dict con url, method, param, vulnerable, severity,
@@ -578,6 +611,42 @@ def _run_target_scan(url, param, method, data, cookie, header, session,
             opts["nosql"], console,
         )
         session_store.save(opts["output_dir"], url, param, method, recon_data)
+
+    # Token anti-CSRF/dinámico a refrescar antes de cada request de
+    # sqlmap (ver Crawler.CSRF_FIELD_PRIORITY / --csrf-field). Sin
+    # esto, un valor capturado una sola vez (VIEWSTATE, logintoken, etc.)
+    # queda estático para todo el scan -- para tokens de un solo uso
+    # (bug real encontrado en tie.teziutlan.tecnm.mx/Moodle) eso rompe
+    # el testeo por completo, y para tokens que se regeneran en cada
+    # respuesta (cloud.teziutlan.tecnm.mx/ASP.NET WebForms) confunde el
+    # check de estabilidad de sqlmap.
+    recon_data["csrf"] = {
+        "detected": csrf is not None,
+        "field": (csrf or {}).get("field"),
+        "refresh_url": (csrf or {}).get("url"),
+    }
+    if csrf:
+        console.print(
+            f"  [#00ff88]→[/] Token dinámico detectado: "
+            f"[bold]{csrf['field']}[/bold] -- se refrescará antes de "
+            f"cada request de sqlmap (--csrf-token)"
+        )
+    else:
+        # Ninguno detectado en vivo -- solo sugerencia informativa de
+        # otro target con el mismo stack, nunca se auto-aplica (dos
+        # targets del mismo stack pueden nombrar su campo distinto).
+        kb_fingerprint = KnowledgeBase.fingerprint(
+            recon_data["stack"], recon_data["orm"], recon_data["waf"],
+        )
+        known_field = KnowledgeBase(opts["output_dir"]).get_known_csrf_field(
+            kb_fingerprint,
+        )
+        if known_field:
+            console.print(
+                f"  [dim]ℹ Otros targets con este stack usaron el campo "
+                f"CSRF '{known_field}' — si el scan falla, probá "
+                f"--csrf-field {known_field}[/dim]"
+            )
 
     console.print()
 
@@ -651,6 +720,9 @@ def _run_target_scan(url, param, method, data, cookie, header, session,
         "proxy": opts["proxy"],
         "output_dir": opts["output_dir"],
         "stealth": opts["stealth_mode"],
+        "csrf_token": (csrf or {}).get("field"),
+        "csrf_url": (csrf or {}).get("url"),
+        "csrf_method": (csrf or {}).get("method", "GET"),
     }
 
     builder = CommandBuilder()
@@ -713,6 +785,24 @@ def _run_target_scan(url, param, method, data, cookie, header, session,
     enricher = ResultEnricher()
     enriched = enricher.enrich(parsed_results, recon_data)
     enriched["auto_escalated"] = auto_escalated
+
+    # Aprendizaje cruzado entre targets del mismo stack: si el campo
+    # CSRF wireado dejó correr pruebas reales (no un shallow-scan),
+    # vale la pena recordarlo para sugerirlo -- nunca aplicarlo solo --
+    # la próxima vez que aparezca un target sin form crawleado del
+    # mismo stack (ver KnowledgeBase.get_known_csrf_field arriba).
+    if csrf:
+        real_test_happened = SqlmapRunner._detect_shallow_scan_reason(
+            execution_result.get("stdout", ""),
+        ) is None
+        if real_test_happened:
+            fp = KnowledgeBase.fingerprint(
+                recon_data["stack"], recon_data["orm"], recon_data["waf"],
+                enriched.get("dbms", {}),
+            )
+            KnowledgeBase(opts["output_dir"]).record_csrf_field(
+                fp, csrf["field"], csrf["url"],
+            )
 
     # La fase de IA es una "segunda opinión" — solo tiene sentido
     # cuando sqlmap NO confirmó nada (o terminó de forma ambigua). Si

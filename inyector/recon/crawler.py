@@ -68,6 +68,39 @@ class Crawler:
         "account", "signin", "session",
     ]
 
+    # Nombres de campo hidden que sugieren un token anti-CSRF/de sesión
+    # dinámico -- sqlmap necesita refrescarlo con --csrf-token/--csrf-url
+    # antes de CADA request, no mandar siempre el mismo valor capturado
+    # una sola vez (que es lo que pasaba antes de este cambio). sqlmap
+    # solo soporta UN --csrf-token por corrida (primer match gana), así
+    # que si un form trae varios (ASP.NET WebForms trae 3: __VIEWSTATE,
+    # __EVENTVALIDATION, __VIEWSTATEGENERATOR), hace falta elegir uno
+    # solo de forma determinística -- de ahí el orden de esta lista.
+    #
+    # Orden: primero los nombres explícitamente "anti-CSRF", que son
+    # los que de verdad gatean el PROCESAMIENTO del request -- bug real
+    # encontrado contra tie.teziutlan.tecnm.mx (Moodle): reusar un
+    # 'logintoken' viejo simplemente re-renderiza el form vacío, sin
+    # procesar el login. Los tokens de framework tipo __VIEWSTATE van
+    # al final -- confirmado contra cloud.teziutlan.tecnm.mx que reusar
+    # un __VIEWSTATE viejo NO rompe el procesamiento ahí (sin
+    # validación MAC estricta); refrescarlo sigue siendo valioso porque
+    # el response siempre trae uno nuevo y eso confunde el check de
+    # estabilidad de sqlmap, pero es defensa en profundidad, no la
+    # causa confirmada de un falso negativo como sí lo es 'logintoken'.
+    CSRF_FIELD_PRIORITY = [
+        "csrfmiddlewaretoken",          # Django
+        "authenticity_token",           # Rails
+        "__requestverificationtoken",   # ASP.NET MVC/Core
+        "csrf_token", "csrf-token",
+        "_token",                       # Laravel
+        "logintoken",                   # Moodle -- single-use, tie.teziutlan.tecnm.mx
+        "sesskey",                      # Moodle
+        "__viewstate",                  # ASP.NET WebForms, cloud.teziutlan.tecnm.mx
+        "__eventvalidation",
+        "__viewstategenerator",
+    ]
+
     def crawl(self, base_url: str, session: requests.Session,
               max_pages: int = 5, max_js_files: int = 6,
               max_api_paths_to_probe: int = 15) -> list[dict]:
@@ -89,6 +122,9 @@ class Crawler:
                 "json_body": dict | None,
                 "source": "html_link"|"html_form"|"js_api_path",
                 "priority": float (0.0-1.0, mayor = más prometedor),
+                "csrf": {"field": str, "url": str, "method": "GET"} | ausente,
+                    -- solo en candidatos "html_form" cuyo form trae un
+                    hidden field con nombre de CSRF_FIELD_PRIORITY.
             }
         """
         logger.info(f"Iniciando crawl de {base_url}...")
@@ -251,14 +287,52 @@ class Crawler:
             # que sqlmap probaba un parámetro que el código real nunca
             # llegaba a procesar -- falso negativo total en un login
             # con SQLi confirmada por SAST y manualmente.
-            candidates.append({
+            candidate = {
                 "url": full_url, "method": method,
                 "params": params,
                 "json_body": None,
                 "source": "html_form",
-            })
+            }
+
+            # Key hermana, no toca "params" -- _dedupe solo mira las
+            # keys de params/json_body, así que esto no le cambia el
+            # comportamiento a ningún candidato existente.
+            csrf_field = self._detect_csrf_field(form)
+            if csrf_field:
+                candidate["csrf"] = {
+                    "field": csrf_field,
+                    # page_url (dónde vive el <form> con el hidden
+                    # field), no full_url/action -- el action puede ser
+                    # un endpoint de submit distinto que no
+                    # necesariamente re-renderiza el form con un token
+                    # fresco en un GET.
+                    "url": page_url,
+                    "method": "GET",
+                }
+
+            candidates.append(candidate)
 
         return candidates
+
+    def _detect_csrf_field(self, form) -> Optional[str]:
+        """Identifica cuál hidden field de este <form> es el mejor
+        candidato a token anti-CSRF/dinámico para wireado con
+        --csrf-token/--csrf-url, según CSRF_FIELD_PRIORITY (primer
+        match gana -- sqlmap solo soporta refrescar UNO por corrida).
+
+        Returns:
+            El nombre real del campo (con su casing original), o None
+            si ningún hidden field matchea un nombre conocido.
+        """
+        hidden_names = {
+            field.get("name").lower(): field.get("name")
+            for field in form.find_all("input", {"type": "hidden"})
+            if field.get("name")
+        }
+        for known in self.CSRF_FIELD_PRIORITY:
+            if known in hidden_names:
+                return hidden_names[known]
+        return None
 
     def _probe_api_paths(self, origin: str, api_paths: list[str],
                          session: requests.Session) -> list[dict]:

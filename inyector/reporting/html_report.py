@@ -167,6 +167,12 @@ class HTMLReportGenerator:
                 {% if nosqli_operator_vuln %}<tr><th>Operator injection</th><td>Confirmada ({{ nosqli_operator_vector }})</td></tr>{% endif %}
                 {% if nosqli_where_vuln %}<tr><th>$where injection</th><td>Confirmada ({{ nosqli_where_technique }})</td></tr>{% endif %}</table></div>
             {% endif %}
+            {% if csrf_detected %}
+            <div class="card"><div class="card-header"><h3>Token CSRF/dinámico</h3><span class="badge badge-info">{{ csrf_field }}</span></div>
+                <table><tr><th>Campo</th><td><code class="inline">{{ csrf_field }}</code></td></tr>
+                <tr><th>Refrescado desde</th><td style="word-break: break-all;">{{ csrf_refresh_url }}</td></tr>
+                <tr><th>Manejo</th><td>sqlmap lo vuelve a leer antes de cada request (--csrf-token/--csrf-url), en vez de mandar siempre el mismo valor capturado.</td></tr></table></div>
+            {% endif %}
         </div>
         <div class="section">
             <h2 class="section-title">🛡️ Recomendaciones de Remediación</h2>
@@ -233,6 +239,9 @@ class HTMLReportGenerator:
                 recon.get("nosqli", {}).get("operator_injection", {}).get("vulnerable", False)
                 or recon.get("nosqli", {}).get("where_injection", {}).get("vulnerable", False)
             ),
+            "csrf_detected": recon.get("csrf", {}).get("detected", False),
+            "csrf_field": recon.get("csrf", {}).get("field", ""),
+            "csrf_refresh_url": recon.get("csrf", {}).get("refresh_url", ""),
             "orm_name": orm_data.get("orm", "none"),
             "escape_hatches": orm_data.get("escape_hatches", []),
             "dbms_name": enriched_results.get("dbms", {}).get("name", "N/A"),

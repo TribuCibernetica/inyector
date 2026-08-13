@@ -74,6 +74,8 @@ class MarkdownReportGenerator:
         lines.append(f"| Vulnerabilidades encontradas | {len(vulnerabilities)} |")
         dbms_str = f"{dbms.get('name', 'N/A')} {dbms.get('version', '')}".strip()
         lines.append(f"| DBMS | {dbms_str or 'N/A'} |")
+        if recon.get("csrf", {}).get("detected"):
+            lines.append(f"| Token CSRF/dinámico | `{recon['csrf']['field']}` |")
         lines.append("")
 
         # Vulnerabilidades
@@ -191,6 +193,19 @@ class MarkdownReportGenerator:
                     lines.append(f"  - {ev}")
             if not op.get("vulnerable") and not where.get("vulnerable"):
                 lines.append("- Sin NoSQL injection detectada")
+            lines.append("")
+
+        csrf_data = recon.get("csrf", {})
+        if csrf_data.get("detected"):
+            lines.append("### Token CSRF/dinámico")
+            lines.append("")
+            lines.append(f"- **Campo:** `{csrf_data.get('field')}`")
+            lines.append(f"- **Refrescado desde:** {csrf_data.get('refresh_url')}")
+            lines.append(
+                "- **Manejo:** sqlmap lo vuelve a leer antes de cada "
+                "request (`--csrf-token`/`--csrf-url`), en vez de mandar "
+                "siempre el mismo valor capturado."
+            )
             lines.append("")
 
         # Asistencia de IA — historial completo (confirmado o no), no

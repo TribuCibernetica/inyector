@@ -75,7 +75,7 @@ def test_targets_file_parses_one_target_per_valid_line(tmp_path, monkeypatch):
     seen_urls = []
 
     def fake_run_target_scan(url, param, method, data, cookie, header,
-                              session, opts, console):
+                              session, opts, console, csrf=None):
         seen_urls.append(url)
         return {"url": url, "method": method, "vulnerable": False, "severity": None}
 

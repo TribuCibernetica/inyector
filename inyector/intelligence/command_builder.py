@@ -42,6 +42,9 @@ class CommandBuilder:
         proxy = scan_config.get("proxy")
         output_dir = scan_config.get("output_dir", "/app/reports")
         stealth = scan_config.get("stealth", True)
+        csrf_token = scan_config.get("csrf_token")
+        csrf_url = scan_config.get("csrf_url")
+        csrf_method = scan_config.get("csrf_method", "GET")
 
         # 1. URL base
         parts.append(f"-u {shlex.quote(url)}")
@@ -113,6 +116,21 @@ class CommandBuilder:
         # 10. Headers adicionales
         for header in headers:
             parts.append(f"--header={shlex.quote(header)}")
+
+        # 10.5 Token anti-CSRF/dinámico -- sqlmap lo refresca ANTES DE
+        # CADA request (no solo una vez al armar --data), porque el
+        # server lo regenera en cada respuesta y algunos (ej. Moodle
+        # 'logintoken') son de un solo uso -- confirmado que reusar un
+        # valor viejo re-renderiza el form en blanco, sin procesar el
+        # login (tie.teziutlan.tecnm.mx). El valor estático ya
+        # capturado se deja en --data igual: sqlmap necesita ALGO
+        # válido para armar el primer request antes de que su propio
+        # refresh entre en juego. --csrf-method siempre explícito
+        # (GET): csrf_url es una página a leer, no un submit.
+        if csrf_token:
+            parts.append(f"--csrf-token={shlex.quote(csrf_token)}")
+            parts.append(f"--csrf-url={shlex.quote(csrf_url or url)}")
+            parts.append(f"--csrf-method={shlex.quote(csrf_method)}")
 
         # 11. Level y Risk
         parts.append(f"--level={level}")
