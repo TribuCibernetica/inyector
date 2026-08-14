@@ -175,6 +175,104 @@ def test_no_csrf_flags_when_csrf_token_absent():
     assert "--csrf-method" not in command
 
 
+def test_flush_session_present_by_default():
+    # No-regresión: 'scan' siempre debe flushear (comportamiento
+    # existente, no debe cambiar).
+    command = CommandBuilder().build(_base_config())
+    assert "--flush-session" in shlex.split(command)
+
+
+def test_flush_session_omitted_when_false():
+    # El comando 'dump' pasa flush_session=False a propósito: necesita
+    # que sqlmap resuma su propia sesión cacheada (técnica/DBMS ya
+    # confirmados) en vez de re-detectar la inyección en cada corrida.
+    command = CommandBuilder().build(_base_config(flush_session=False))
+    assert "--flush-session" not in shlex.split(command)
+
+
+def test_dump_current_action_adds_quick_enum_flags():
+    config = _base_config(dump={"action": "current"})
+    tokens = shlex.split(CommandBuilder().build(config))
+
+    for flag in ("--current-db", "--current-user", "--hostname", "--is-dba"):
+        assert flag in tokens
+
+
+def test_dump_dbs_action():
+    tokens = shlex.split(CommandBuilder().build(_base_config(dump={"action": "dbs"})))
+    assert "--dbs" in tokens
+
+
+def test_dump_tables_action_with_db():
+    # Grounded en itescam.edu.mx: database() = 'itescam_2011'.
+    config = _base_config(dump={"action": "tables", "db": "itescam_2011"})
+    tokens = shlex.split(CommandBuilder().build(config))
+
+    assert "-D" in tokens
+    assert tokens[tokens.index("-D") + 1] == "itescam_2011"
+    assert "--tables" in tokens
+
+
+def test_dump_columns_action_with_db_and_table():
+    config = _base_config(
+        dump={"action": "columns", "db": "itescam_2011", "table": "noticias"},
+    )
+    tokens = shlex.split(CommandBuilder().build(config))
+
+    assert tokens[tokens.index("-D") + 1] == "itescam_2011"
+    assert tokens[tokens.index("-T") + 1] == "noticias"
+    assert "--columns" in tokens
+
+
+def test_dump_table_action_with_columns_and_where():
+    config = _base_config(
+        dump={
+            "action": "dump", "db": "itescam_2011", "table": "usuarios",
+            "columns": "user,pass", "where": "id=1",
+        },
+    )
+    tokens = shlex.split(CommandBuilder().build(config))
+
+    assert tokens[tokens.index("-D") + 1] == "itescam_2011"
+    assert tokens[tokens.index("-T") + 1] == "usuarios"
+    assert "--dump" in tokens
+    assert tokens[tokens.index("-C") + 1] == "user,pass"
+    assert "--where=id=1" in tokens
+
+
+def test_dump_all_action_excludes_sysdbs_by_default():
+    tokens = shlex.split(CommandBuilder().build(_base_config(dump={"action": "dump_all"})))
+    assert "--dump-all" in tokens
+    assert "--exclude-sysdbs" in tokens
+
+
+def test_dump_all_action_can_include_sysdbs():
+    config = _base_config(dump={"action": "dump_all", "exclude_sysdbs": False})
+    tokens = shlex.split(CommandBuilder().build(config))
+    assert "--dump-all" in tokens
+    assert "--exclude-sysdbs" not in tokens
+
+
+def test_dump_table_name_with_special_characters_is_shell_safe():
+    # Defensivo: un nombre de tabla/db con espacios o comillas no debe
+    # romper el armado del comando (mismo principio que el resto del
+    # archivo -- todo pasa por shlex.quote).
+    config = _base_config(
+        dump={"action": "tables", "db": "my db's name"},
+    )
+    tokens = shlex.split(CommandBuilder().build(config))
+    assert tokens[tokens.index("-D") + 1] == "my db's name"
+
+
+def test_no_dump_flags_when_dump_absent():
+    # No-regresión: la config default (sin "dump") -- todos los scans
+    # normales -- no debe cambiar de comportamiento.
+    command = CommandBuilder().build(_base_config())
+    for flag in ("--dump", "--dbs", "--tables", "--columns", "--dump-all",
+                 "--current-db", "--search"):
+        assert flag not in command
+
+
 def test_no_safe_url_added_when_safe_freq_is_zero():
     config = _base_config(
         timing={"delay": 1, "timeout": 30, "retries": 3, "safe_freq": 0},

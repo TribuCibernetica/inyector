@@ -45,6 +45,8 @@ class CommandBuilder:
         csrf_token = scan_config.get("csrf_token")
         csrf_url = scan_config.get("csrf_url")
         csrf_method = scan_config.get("csrf_method", "GET")
+        flush_session = scan_config.get("flush_session", True)
+        dump_config = scan_config.get("dump")
 
         # 1. URL base
         parts.append(f"-u {shlex.quote(url)}")
@@ -132,6 +134,13 @@ class CommandBuilder:
             parts.append(f"--csrf-url={shlex.quote(csrf_url or url)}")
             parts.append(f"--csrf-method={shlex.quote(csrf_method)}")
 
+        # 10.6 Flags de enumeración/extracción (comando `dump`) -- se
+        # agregan acá, ANTES de level/risk, para que la escalada de
+        # nivel/risk del llamador (ver `_run_dump_with_persistence` en
+        # dump.py) siga aplicando igual sobre el mismo comando.
+        if dump_config:
+            parts.extend(self._build_dump_flags(dump_config))
+
         # 11. Level y Risk
         parts.append(f"--level={level}")
         parts.append(f"--risk={risk}")
@@ -182,13 +191,87 @@ class CommandBuilder:
                 parts.append(f"--string={shlex.quote(orm_strings[orm_name])}")
 
         # 17. Flush session
-        parts.append("--flush-session")
+        # `dump` pasa flush_session=False a propósito: sqlmap cachea la
+        # técnica/DBMS ya confirmados en su propia sesión
+        # (`<output_dir>/<host>/session.sqlite`) -- flushearla en cada
+        # invocación de `dump` obligaría a sqlmap a re-detectar la
+        # inyección desde cero cada vez, en vez de ir directo a
+        # enumerar/extraer. `scan` sigue flusheando siempre (default
+        # True) -- no cambia su comportamiento existente.
+        if flush_session:
+            parts.append("--flush-session")
 
         comando = " ".join(parts)
         logger.info(f"Comando sqlmap construido ({len(parts)} flags)")
         logger.debug(f"Comando: {comando}")
 
         return comando
+
+    def _build_dump_flags(self, dump_config: dict) -> list[str]:
+        """Traduce la config de acción de `dump` a flags reales de
+        enumeración/extracción de sqlmap.
+
+        Args:
+            dump_config: dict con al menos "action" (uno de "current",
+                "dbs", "tables", "columns", "dump", "dump_all",
+                "search") y, según la acción, "db"/"table"/"columns"/
+                "where"/"start"/"stop"/"exclude_sysdbs"/"search_term".
+
+        Returns:
+            Lista de flags de sqlmap (sin unir), ya con shlex.quote
+            donde corresponde.
+        """
+        action = dump_config.get("action")
+        db = dump_config.get("db")
+        table = dump_config.get("table")
+        columns = dump_config.get("columns")
+        where = dump_config.get("where")
+        flags: list[str] = []
+
+        if action == "current":
+            flags.extend([
+                "--current-db", "--current-user", "--hostname", "--is-dba",
+            ])
+        elif action == "dbs":
+            flags.append("--dbs")
+        elif action == "tables":
+            if db:
+                flags.append(f"-D {shlex.quote(db)}")
+            flags.append("--tables")
+        elif action == "columns":
+            if db:
+                flags.append(f"-D {shlex.quote(db)}")
+            if table:
+                flags.append(f"-T {shlex.quote(table)}")
+            flags.append("--columns")
+        elif action == "dump":
+            if db:
+                flags.append(f"-D {shlex.quote(db)}")
+            if table:
+                flags.append(f"-T {shlex.quote(table)}")
+            flags.append("--dump")
+            if columns:
+                flags.append(f"-C {shlex.quote(columns)}")
+            if where:
+                flags.append(f"--where={shlex.quote(where)}")
+            if dump_config.get("start"):
+                flags.append(f"--start={dump_config['start']}")
+            if dump_config.get("stop"):
+                flags.append(f"--stop={dump_config['stop']}")
+        elif action == "dump_all":
+            flags.append("--dump-all")
+            if dump_config.get("exclude_sysdbs", True):
+                flags.append("--exclude-sysdbs")
+        elif action == "search":
+            flags.append("--search")
+            if db:
+                flags.append(f"-D {shlex.quote(db)}")
+            if table:
+                flags.append(f"-T {shlex.quote(table)}")
+            if columns:
+                flags.append(f"-C {shlex.quote(columns)}")
+
+        return flags
 
     def _select_technique(self, waf: str, stealth: bool,
                           user_technique: Optional[str]) -> str:
