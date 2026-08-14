@@ -98,6 +98,27 @@ def test_reports_honestly_when_nothing_bypasses():
     assert len(result["tested"]) >= 5
 
 
+def test_probes_never_follow_redirects():
+    # Regresión real (itescam.edu.mx): sin allow_redirects=False, cada
+    # mutación que seguía bloqueada disparaba reintentos de resolución
+    # DNS contra el dominio sinkhole (que ni resuelve) antes de darse
+    # por vencida -- varios segundos de más por request, sin aportar
+    # nada (el Location header crudo ya alcanza para clasificar el
+    # bloqueo, ver _is_blocked).
+    session = MagicMock()
+    session.get.side_effect = [
+        _clean(), _sinkhole_block(), _bypassed_like_clean(),
+        _sinkhole_block(), _bypassed_like_clean(),
+    ]
+
+    WAFBypassProber().discover(
+        "https://www.itescam.edu.mx/portal/noticias.php", session, "id",
+    )
+
+    for call in session.get.call_args_list:
+        assert call.kwargs.get("allow_redirects") is False
+
+
 def test_network_failure_is_treated_as_blocked_not_bypassed():
     # Un timeout/conexión rechazada es indistinguible de un bloqueo
     # agresivo -- no debe confundirse con "el bypass funcionó". Tras la

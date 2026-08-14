@@ -178,8 +178,18 @@ class WAFBypassProber:
 
     def _safe_get(self, session: requests.Session,
                   url: str) -> Optional[requests.Response]:
+        # allow_redirects=False a propósito -- mismo motivo que el
+        # probe de sinkhole en WAFDetector: si el WAF bloquea
+        # redirigiendo a un dominio que ni resuelve (keyword_sinkhole),
+        # dejar que requests siga ese redirect dispara reintentos de
+        # resolución DNS con backoff (varios segundos por request) sin
+        # aportar nada -- ya alcanza con inspeccionar el header
+        # 'Location' crudo (ver _is_blocked). Bug real encontrado
+        # corriendo este mismo prober contra itescam.edu.mx: sin esto,
+        # cada mutación que seguía bloqueada tardaba varios segundos de
+        # más solo en reintentos de DNS.
         try:
-            return session.get(url, timeout=30, allow_redirects=True)
+            return session.get(url, timeout=30, allow_redirects=False)
         except requests.exceptions.RequestException:
             return None
 

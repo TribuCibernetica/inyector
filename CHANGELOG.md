@@ -13,6 +13,17 @@ Todavía no tagueado — se convierte en `1.1.0` (MINOR: solo agrega,
 nada rompe compatibilidad) cuando se commitee y se taguee.
 
 ### Corregido
+- `WAFBypassProber._safe_get` seguía redirects (`allow_redirects=True`)
+  al probar cada mutación -- misma clase de bug que el fix de
+  `--ignore-redirects` de abajo, pero en el prober nuevo en vez de en
+  sqlmap: contra un WAF `keyword_sinkhole`, cada mutación que seguía
+  bloqueada disparaba reintentos de resolución DNS de varios segundos
+  contra el dominio sinkhole antes de darse por vencida, sin aportar
+  nada (el header `Location` crudo ya alcanza para clasificar el
+  bloqueo). Encontrado en la misma corrida en vivo contra
+  `itescam.edu.mx` que reveló el bug de abajo. Ahora usa
+  `allow_redirects=False` igual que el probe de sinkhole que ya existe
+  en `WAFDetector`.
 - `CommandBuilder.build` no agregaba `--ignore-redirects` contra WAFs
   `keyword_sinkhole` (los que bloquean redirigiendo a un dominio ajeno
   que ni resuelve). Sin ese flag, sqlmap sigue el redirect (default de
