@@ -23,6 +23,7 @@ from inyector.commands import common
 from inyector.utils.logger import configure_logging
 from inyector.utils.stealth import StealthEngine
 from inyector.recon.waf_detector import WAFDetector
+from inyector.recon.waf_bypass_prober import WAFBypassProber
 from inyector.recon.stack_detector import StackDetector
 from inyector.recon.orm_detector import ORMDetector
 from inyector.recon.graphql_detector import GraphQLDetector
@@ -785,6 +786,72 @@ def _run_target_scan(url, param, method, data, cookie, header, session,
     enricher = ResultEnricher()
     enriched = enricher.enrich(parsed_results, recon_data)
     enriched["auto_escalated"] = auto_escalated
+
+    # Descubrimiento de bypass de WAF: TamperSelector ya tiene un
+    # fallback ESTÁTICO para WAF de vendor desconocido
+    # (space2comment/scalarfuncbypass/between/randomcase, derivado del
+    # hallazgo manual de itescam.edu.mx) pero lo aplica a ciegas, sin
+    # validar si de verdad funciona contra ESTE target. Si sqlmap no
+    # confirmó nada y el WAF es 'unknown'/'keyword_sinkhole', probar
+    # empíricamente con requests HTTP crudos (rápido, sin sqlmap) qué
+    # mutación esquiva el bloqueo, y si encuentra algo, reintentar
+    # sqlmap UNA vez con esos tampers agregados -- automatiza el mismo
+    # proceso de prueba A/B que se hizo a mano para encontrar los
+    # bypasses de itescam.
+    waf_name = recon_data["waf"]["waf"]
+    if (not enriched.get("vulnerable") or scan_failed) and waf_name in (
+        "unknown", "keyword_sinkhole",
+    ):
+        console.print(
+            f"[bold #00ff88][*] Sin confirmación con WAF '{waf_name}' -- "
+            "probando bypass empírico antes de rendirse...[/bold #00ff88]\n"
+        )
+        bypass_result = WAFBypassProber().discover(url, session, param, method, data)
+        recon_data["waf_bypass"] = bypass_result
+        for note in bypass_result["tested"]:
+            console.print(f"  [dim]ℹ {note}[/dim]")
+
+        new_tampers = [
+            t for t in bypass_result["confirmed_tampers"]
+            if t not in selected_tampers
+        ]
+        if new_tampers:
+            console.print(
+                f"\n  [bold #00ff88]→[/] Bypass confirmado: "
+                f"[bold]{', '.join(new_tampers)}[/bold] -- reintentando "
+                f"sqlmap con esto agregado...\n"
+            )
+            # También al máximo level/risk -- este es el último intento
+            # de esta corrida, tiene sentido darle la mejor chance
+            # posible en vez de repetir el level/risk original si ya se
+            # había escalado antes por otro motivo.
+            retry_command = CommandBuilder().build({
+                **scan_config,
+                "tampers": selected_tampers + new_tampers,
+                "level": common.AUTO_ESCALATE_LEVEL,
+                "risk": common.AUTO_ESCALATE_RISK,
+            })
+            if opts["verbose"]:
+                console.print(f"\n  [dim]Comando (bypass): {retry_command}[/dim]")
+
+            retry_start = time.time()
+            execution_result = SqlmapRunner(verbose=opts["verbose"]).run(
+                retry_command, opts["output_dir"],
+            )
+            elapsed_time += time.time() - retry_start
+            scan_failed = not execution_result.get("success", False)
+
+            parsed_results = parser.parse(
+                execution_result["stdout"], opts["output_dir"], target_url=url,
+            )
+            enriched = enricher.enrich(parsed_results, recon_data)
+            enriched["auto_escalated"] = auto_escalated
+            enriched["waf_bypass_retry"] = True
+        else:
+            console.print(
+                "\n  [yellow]→ Sin bypass confirmado -- se agota la "
+                "persistencia[/yellow]\n"
+            )
 
     # Aprendizaje cruzado entre targets del mismo stack: si el campo
     # CSRF wireado dejó correr pruebas reales (no un shallow-scan),
