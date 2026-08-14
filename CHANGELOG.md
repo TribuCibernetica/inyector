@@ -13,6 +13,20 @@ Todavía no tagueado — se convierte en `1.1.0` (MINOR: solo agrega,
 nada rompe compatibilidad) cuando se commitee y se taguee.
 
 ### Corregido
+- `CommandBuilder.build` no agregaba `--ignore-redirects` contra WAFs
+  `keyword_sinkhole` (los que bloquean redirigiendo a un dominio ajeno
+  que ni resuelve). Sin ese flag, sqlmap sigue el redirect (default de
+  `--batch`) y reintenta la resolución DNS varias veces con backoff
+  antes de rendirse, metiendo demoras variables de varios segundos en
+  cada request bloqueado — que contaminan justo la señal que mide la
+  técnica time-based blind (un reintento de DNS es indistinguible de
+  un `SLEEP` real). Bug real encontrado verificando en vivo el
+  descubrimiento de bypass de WAF contra `itescam.edu.mx`: sqlmap
+  marcaba `id` como injectable en el heurístico inicial, pero su
+  propia re-verificación lo rechazaba después, aun con los tampers
+  correctos (`space2comment`, `scalarfuncbypass`) ya seleccionados —
+  el problema nunca fue de tampers, era el ruido del redirect
+  perturbando la medición de tiempo.
 - `CommandBuilder.build` siempre agregaba `--threads`, aunque sqlmap
   rechaza la combinación `--csrf-token` + `--threads` ("option
   '--csrf-token' is incompatible with option '--threads'") — el scan

@@ -177,6 +177,22 @@ class CommandBuilder:
         if waf == "cloudflare":
             parts.append("--hpp")
 
+        # 'keyword_sinkhole' -> --ignore-redirects. Este WAF bloquea
+        # con un 302 hacia un dominio ajeno que ni siquiera resuelve
+        # (ver WAFDetector/keyword_sinkhole) -- por default (--batch
+        # responde 'Y' a "do you want to follow?") sqlmap SIGUE ese
+        # redirect y reintenta la resolución DNS varias veces con
+        # backoff antes de rendirse, metiendo demoras grandes y
+        # variables (varios segundos) en cada request bloqueado. Eso
+        # contamina justo la señal que mide la técnica time-based
+        # blind (un delay de reintento de DNS es indistinguible de un
+        # SLEEP real) -- bug real encontrado contra itescam.edu.mx:
+        # sqlmap marcaba 'id' como injectable en el heurístico inicial
+        # pero su propia re-verificación lo rechazaba después, aun con
+        # los tampers correctos ya seleccionados.
+        if waf == "keyword_sinkhole":
+            parts.append("--ignore-redirects")
+
         # 16. Si ORM detectado con raw queries
         orm_data = scan_config.get("orm", {})
         if orm_data.get("raw_queries_likely"):

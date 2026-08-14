@@ -102,6 +102,28 @@ def test_modsecurity_waf_does_not_add_hex_incompatible_with_no_cast():
     assert "--hex" not in tokens
 
 
+def test_keyword_sinkhole_waf_adds_ignore_redirects():
+    # Regresión real (itescam.edu.mx): este WAF bloquea con un 302
+    # hacia un dominio ajeno que ni resuelve -- sin --ignore-redirects,
+    # sqlmap sigue ese redirect y reintenta la resolución DNS varias
+    # veces con backoff, metiendo demoras variables que contaminan la
+    # medición de la técnica time-based blind. sqlmap marcaba 'id'
+    # como injectable en el heurístico pero su propia re-verificación
+    # lo rechazaba después, aun con los tampers correctos.
+    config = _base_config(waf={"waf": "keyword_sinkhole"})
+    tokens = shlex.split(CommandBuilder().build(config))
+    assert "--ignore-redirects" in tokens
+
+
+def test_no_ignore_redirects_for_other_wafs():
+    # No-regresión: solo 'keyword_sinkhole' tiene este comportamiento
+    # confirmado -- no asumir que aplica a cualquier WAF desconocido.
+    for waf_name in ("none", "unknown", "modsecurity", "cloudflare"):
+        config = _base_config(waf={"waf": waf_name})
+        command = CommandBuilder().build(config)
+        assert "--ignore-redirects" not in command
+
+
 def test_aspnet_webforms_param_name_is_shell_safe():
     # Regresión real (cloud.teziutlan.tecnm.mx): nombres de campo de
     # ASP.NET WebForms como 'ctl00$cphContenido$txtNoControl' traen '$'
