@@ -76,6 +76,11 @@ class MarkdownReportGenerator:
         lines.append(f"| DBMS | {dbms_str or 'N/A'} |")
         if recon.get("csrf", {}).get("detected"):
             lines.append(f"| Token CSRF/dinámico | `{recon['csrf']['field']}` |")
+        if recon.get("waf_bypass", {}).get("confirmed_tampers"):
+            lines.append(
+                f"| Bypass de WAF confirmado | "
+                f"{', '.join(recon['waf_bypass']['confirmed_tampers'])} |"
+            )
         lines.append("")
 
         # Vulnerabilidades
@@ -206,6 +211,19 @@ class MarkdownReportGenerator:
                 "request (`--csrf-token`/`--csrf-url`), en vez de mandar "
                 "siempre el mismo valor capturado."
             )
+            lines.append("")
+
+        waf_bypass_data = recon.get("waf_bypass", {})
+        if waf_bypass_data:
+            lines.append("### Descubrimiento de bypass de WAF")
+            lines.append("")
+            confirmed = waf_bypass_data.get("confirmed_tampers", [])
+            if confirmed:
+                lines.append(f"- **Tampers confirmados:** {', '.join(confirmed)}")
+            else:
+                lines.append("- **Sin bypass confirmado**")
+            for note in waf_bypass_data.get("tested", []):
+                lines.append(f"  - {note}")
             lines.append("")
 
         # Asistencia de IA — historial completo (confirmado o no), no

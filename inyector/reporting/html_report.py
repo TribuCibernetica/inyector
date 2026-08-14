@@ -173,6 +173,13 @@ class HTMLReportGenerator:
                 <tr><th>Refrescado desde</th><td style="word-break: break-all;">{{ csrf_refresh_url }}</td></tr>
                 <tr><th>Manejo</th><td>sqlmap lo vuelve a leer antes de cada request (--csrf-token/--csrf-url), en vez de mandar siempre el mismo valor capturado.</td></tr></table></div>
             {% endif %}
+            {% if waf_bypass_attempted %}
+            <div class="card"><div class="card-header"><h3>Descubrimiento de bypass de WAF</h3>{% if waf_bypass_tampers %}<span class="badge badge-critical">bypass confirmado</span>{% else %}<span class="badge badge-info">sin bypass</span>{% endif %}</div>
+                <table>
+                {% if waf_bypass_tampers %}<tr><th>Tampers confirmados</th><td>{{ waf_bypass_tampers }}</td></tr>{% endif %}
+                <tr><th>Pruebas realizadas</th><td>{% for note in waf_bypass_tested %}• {{ note }}<br>{% endfor %}</td></tr>
+                </table></div>
+            {% endif %}
         </div>
         <div class="section">
             <h2 class="section-title">🛡️ Recomendaciones de Remediación</h2>
@@ -242,6 +249,9 @@ class HTMLReportGenerator:
             "csrf_detected": recon.get("csrf", {}).get("detected", False),
             "csrf_field": recon.get("csrf", {}).get("field", ""),
             "csrf_refresh_url": recon.get("csrf", {}).get("refresh_url", ""),
+            "waf_bypass_attempted": bool(recon.get("waf_bypass")),
+            "waf_bypass_tampers": ", ".join(recon.get("waf_bypass", {}).get("confirmed_tampers", [])),
+            "waf_bypass_tested": recon.get("waf_bypass", {}).get("tested", []),
             "orm_name": orm_data.get("orm", "none"),
             "escape_hatches": orm_data.get("escape_hatches", []),
             "dbms_name": enriched_results.get("dbms", {}).get("name", "N/A"),

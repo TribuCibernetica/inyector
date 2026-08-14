@@ -60,6 +60,28 @@ nada rompe compatibilidad) cuando se commitee y se taguee.
   XSS como por la de timing.
 
 ### Agregado
+- Descubrimiento automático de bypass de WAF (`WAFBypassProber`,
+  `inyector/recon/waf_bypass_prober.py`): cuando el WAF detectado es de
+  vendor desconocido (`unknown`/`keyword_sinkhole`) y sqlmap no
+  confirmó nada, prueba empíricamente — con requests HTTP crudos,
+  rápido, sin invocar sqlmap — una batería de mutaciones incrementales
+  (una variable por vez: separador de espacio `/**/`/`+`/doble-espacio,
+  case-randomization de la keyword, y aislar la keyword `SELECT` vía
+  `scalarfuncbypass`) contra el target real, y si algo esquiva el
+  bloqueo, reintenta sqlmap una vez más con esos tampers agregados
+  (además escalando level/risk al máximo, dado que es el último
+  intento de la corrida). Automatiza el mismo proceso de prueba A/B
+  que se hizo a mano para encontrar los dos bypasses de
+  itescam.edu.mx — `TamperSelector` ya tenía un fallback estático
+  idéntico para WAF desconocido, pero lo aplicaba a ciegas sin validar
+  si de verdad funciona contra el target puntual; este descubrimiento
+  lo valida (o encuentra algo distinto) antes de comprometerse a una
+  corrida completa. Reporta siempre qué se probó, nunca "no se pudo"
+  en silencio — nuevo bloque `waf_bypass` en los tres formatos de
+  reporte. Extraída la transformación de `scalarfuncbypass` a
+  `inyector/utils/scalar_func_bypass.py` (lógica pura, sin depender de
+  `lib.core.enums` de sqlmap) para que tanto el tamper real como el
+  prober la usen sin duplicar código.
 - Nuevo comando `dump`: enumeración/extracción persistente (`--current`,
   `--dbs`, `-D`/`--tables`, `-D -T`/`--columns`, `--dump`,
   `--dump-all`, `--search`) contra un target ya confirmado inyectable

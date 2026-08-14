@@ -56,6 +56,7 @@ class JSONReportGenerator:
                 "graphql": enriched_results.get("recon", {}).get("graphql", {}),
                 "nosqli": enriched_results.get("recon", {}).get("nosqli", {}),
                 "csrf": enriched_results.get("recon", {}).get("csrf", {}),
+                "waf_bypass": enriched_results.get("recon", {}).get("waf_bypass", {}),
                 "injectable_params": enriched_results.get("recon", {})
                     .get("endpoints", {}).get("injectable_params", []),
                 "consistency_notes": enriched_results.get("recon", {})
