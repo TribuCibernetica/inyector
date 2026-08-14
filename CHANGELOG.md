@@ -60,6 +60,30 @@ nada rompe compatibilidad) cuando se commitee y se taguee.
   XSS como por la de timing.
 
 ### Agregado
+- Nuevo comando `dump`: enumeración/extracción persistente (`--current`,
+  `--dbs`, `-D`/`--tables`, `-D -T`/`--columns`, `--dump`,
+  `--dump-all`, `--search`) contra un target ya confirmado inyectable
+  por un `scan` anterior. No reimplementa "recordar la técnica/DBMS
+  confirmado" — sqlmap ya cachea eso solo en su propia sesión
+  (`session.sqlite`), así que `dump` apunta al mismo `--output-dir`/
+  URL/param/method y NO manda `--flush-session`
+  (`CommandBuilder.build` ahora acepta `flush_session=False` para
+  esto), dejando que sqlmap resuma la inyección ya confirmada en vez
+  de re-detectar desde cero. Reintenta automáticamente antes de
+  rendirse ("pentester persistente", no un solo intento): escala
+  level/risk al máximo si el primer intento viene vacío, y para
+  acciones de enumeración (baratas) fuerza una técnica a la vez
+  (E→U→T→B→S) si sigue sin resultados — para `--dump`/`--dump-all`
+  sobre una tabla completa solo se escala level/risk una vez, dado que
+  probar 5 técnicas contra un boolean-blind puede tardar horas.
+  Reporte: solo estructura y conteos (bases/tablas/columnas/filas
+  encontradas), nunca los valores extraídos — esos quedan en el CSV
+  que sqlmap ya genera por su cuenta bajo
+  `<output_dir>/<host>/dump/<db>/<tabla>.csv` (decisión explícita de
+  manejo de datos sensibles). Nuevo `inyector/reporting/dump_parser.py`
+  (`DumpOutputParser`) para el output de este modo, separado de
+  `SqlmapOutputParser` porque el modo dump imprime marcadores
+  completamente distintos a los del modo detección.
 - Detección automática de tokens anti-CSRF/dinámicos (`__VIEWSTATE`,
   `__EVENTVALIDATION`, `__RequestVerificationToken`, `csrfmiddlewaretoken`,
   `authenticity_token`, `csrf_token`, `_token`, `logintoken`, `sesskey`)
