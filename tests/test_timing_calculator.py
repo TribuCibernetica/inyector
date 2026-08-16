@@ -10,19 +10,32 @@ mapa, dejando el rate-limiting efectivamente desactivado para un WAF
 no reconocido.
 """
 
-import itertools
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from inyector.intelligence.timing_calculator import TimingCalculator
 
+# patchear "...timing_calculator.time.time" patchea el módulo GLOBAL time
+# (import time, no from time import time comparte el mismo objeto módulo
+# en todos lados) -- el propio logging de Python llama a time.time() al
+# crear cada LogRecord, así que un logger.info/debug habilitado de por
+# medio consume valores extra de la lista mockeada y desalinea qué par
+# start/end corresponde a cada muestra (bug real en CI: nivel INFO
+# habilitado por defecto ahí dispara el logger.info() del inicio de
+# measure_baseline, corriendo todos los índices uno a la derecha).
+# Se silencia el logger del módulo para que measure_baseline consuma
+# time.time() únicamente en sus propios `start`/`end`, sin ruido externo.
+_LOGGER_NAME = "inyector.intelligence.timing_calculator"
+
 
 # ---------------------------------------------------------------------
 # measure_baseline
 # ---------------------------------------------------------------------
 
-def test_measure_baseline_uses_trimmed_mean_with_three_or_more_samples():
+def test_measure_baseline_uses_trimmed_mean_with_three_or_more_samples(caplog):
+    caplog.set_level(logging.CRITICAL, logger=_LOGGER_NAME)
     calculator = TimingCalculator()
     session = MagicMock()
 
@@ -36,33 +49,21 @@ def test_measure_baseline_uses_trimmed_mean_with_three_or_more_samples():
         0.9, 0.95,   # sample 4: 50ms
         1.0, 2.0,    # sample 5: 1000ms
     ]
-    # patchear "...timing_calculator.time.time" patchea el módulo GLOBAL
-    # time (import time, no from time import time comparte el mismo
-    # objeto módulo en todos lados) -- el propio logging de Python llama
-    # a time.time() para poner timestamp a cada LogRecord, así que
-    # cualquier logger.info/debug de por medio consume valores extra de
-    # esta lista. Repetir el último valor indefinidamente (en vez de una
-    # lista finita) evita un StopIteration frágil y dependiente de la
-    # config de logging de cada entorno -- bug real encontrado en CI
-    # (Linux, pytest 9.0.3) que no se veía en local con otra config.
-    time_iter = itertools.chain(time_values, itertools.repeat(time_values[-1]))
-    with patch("inyector.intelligence.timing_calculator.time.time", side_effect=time_iter):
+    with patch("inyector.intelligence.timing_calculator.time.time", side_effect=time_values):
         baseline = calculator.measure_baseline("http://x.com", session, samples=5)
 
     assert baseline == pytest.approx(200.0)
 
 
-def test_measure_baseline_uses_plain_mean_with_fewer_than_three_samples():
+def test_measure_baseline_uses_plain_mean_with_fewer_than_three_samples(caplog):
+    caplog.set_level(logging.CRITICAL, logger=_LOGGER_NAME)
     calculator = TimingCalculator()
     session = MagicMock()
     # Falla en la 2da muestra -> solo 1 muestra exitosa (100ms).
     session.get.side_effect = [MagicMock(), Exception("boom")]
 
     time_values = [0.0, 0.1, 5.0]  # start/end sample1, start (sin end) sample2
-    # Ver comentario en el test anterior -- mismo motivo para no usar
-    # una lista finita acá.
-    time_iter = itertools.chain(time_values, itertools.repeat(time_values[-1]))
-    with patch("inyector.intelligence.timing_calculator.time.time", side_effect=time_iter):
+    with patch("inyector.intelligence.timing_calculator.time.time", side_effect=time_values):
         baseline = calculator.measure_baseline("http://x.com", session, samples=2)
 
     assert baseline == pytest.approx(100.0)
