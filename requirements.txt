@@ -21,4 +21,4 @@ brotli==1.2.0
 # Asistente de IA opcional (--ai-assist). Solo se usa si el usuario
 # configura GEMINI_API_KEY — sin eso, el paquete queda instalado pero
 # nunca se importa ni se llama a ninguna API externa.
-google-genai==2.12.1
+google-genai==2.18.0

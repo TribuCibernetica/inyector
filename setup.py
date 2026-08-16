@@ -21,7 +21,7 @@ setup(
         "colorama==0.4.6",
         "pydantic==2.13.4",
         "brotli==1.2.0",
-        "google-genai==2.12.1",
+        "google-genai==2.18.0",
     ],
     entry_points={
         "console_scripts": [
