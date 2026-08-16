@@ -29,12 +29,13 @@ funcionalidad nueva compatible hacia atrás, PATCH para fixes.
   de Python del runner de CI, pero `pip-audit` audita todo lo
   instalado en el entorno. Pineado `setuptools>=83.0.0` en
   `requirements-dev.txt` para forzar la versión parchada.
-- gitleaks marcaba como secreto un fixture de test
-  (`tests/test_ai_assistant.py`, `api_key="explicit-key-123"`) — falso
-  positivo de la regla `generic-api-key` por forma de patrón, no un
-  secreto real. Reescaneado como "nuevo" tras el force-push de historial
-  de más abajo (todo el historial cambió de hash de golpe). Agregado
-  `gitleaks:allow` inline + `.gitleaksignore` con el fingerprint exacto.
+- gitleaks marcaba como secreto un fixture de test en
+  `tests/test_ai_assistant.py` (un valor de prueba con forma de API key
+  pero obviamente falso) — falso positivo de la regla `generic-api-key`
+  por forma de patrón, no un secreto real. Reescaneado como "nuevo"
+  tras el force-push de historial de más abajo (todo el historial
+  cambió de hash de golpe). Agregado `gitleaks:allow` inline +
+  `.gitleaksignore` con el fingerprint exacto.
 - `tests/test_targets_file.py::test_targets_file_parses_one_target_per_valid_line`
   fallaba con `PermissionError` en CI (Linux, fuera de Docker): sin
   `--output-dir` explícito, `scan` intenta crear `/app/reports` (el
