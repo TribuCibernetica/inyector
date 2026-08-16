@@ -37,8 +37,8 @@ def test_missing_api_key_raises_clear_error(monkeypatch):
 def test_explicit_api_key_is_used_over_env(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with patch("google.genai.Client") as mock_client_cls:
-        AIAssistant(api_key="explicit-key-123")
-        mock_client_cls.assert_called_once_with(api_key="explicit-key-123")
+        AIAssistant(api_key="explicit-key-123")  # gitleaks:allow -- fixture de test, no es una key real
+        mock_client_cls.assert_called_once_with(api_key="explicit-key-123")  # gitleaks:allow
 
 
 def test_suggest_advanced_payloads_parses_structured_response(monkeypatch):
