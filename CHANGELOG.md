@@ -9,6 +9,22 @@ funcionalidad nueva compatible hacia atrás, PATCH para fixes.
 
 ## [Unreleased]
 
+### Agregado
+- CI: workflow de `CodeQL` (`.github/workflows/codeql.yml`) — análisis
+  estático de seguridad (SAST) de GitHub, gratis para repos públicos.
+  Corre en cada push/PR a `main` y una vez por semana.
+- Protección de la rama `main` en GitHub: bloqueado force-push y
+  borrado, y requiere que pasen los 4 checks de `test.yml` (`lint`,
+  `security`, `unit-tests`, `integration-test`) antes de mergear un PR.
+
+### Corregido
+- `ruff check` fallaba por un import sin usar (`typing.Optional` en
+  `inyector/commands/dump.py`) — esto bloqueaba TODO el CI: `unit-tests`
+  e `integration-test` dependen de que `lint`/`security` pasen primero
+  (`needs: [lint, security]` en `test.yml`), así que la suite real de
+  pytest (282/282 en local) nunca llegó a correr en ninguna de las 13
+  corridas de CI desde que el repo se hizo público.
+
 ## [1.1.0] - 2026-08-16
 
 ### Corregido

@@ -1,0 +1,42 @@
+name: CodeQL
+
+# Análisis de seguridad estático (SAST) de GitHub — gratis para repos
+# públicos (parte de GitHub Advanced Security, sin costo en OSS).
+# Corre en cada push/PR a main y además una vez por semana, para
+# agarrar CVEs nuevas en patrones ya existentes en el código aunque no
+# haya cambios.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "0 6 * * 1" # lunes 06:00 UTC
+
+jobs:
+  analyze:
+    name: Analizar (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inicializar CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Analizar
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

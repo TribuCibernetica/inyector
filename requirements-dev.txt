@@ -3,3 +3,9 @@ pytest==9.0.3
 ruff==0.16.1
 mypy==2.3.0
 pip-audit==2.10.1
+# No es dependencia directa de inyector -- viene con la imagen base de
+# Python en runners de CI (ubuntu-latest trae setuptools 79.0.1), que
+# tiene PYSEC-2026-3447. Pineado acá para forzar la versión parchada,
+# ya que pip-audit audita todo lo instalado en el entorno, no solo
+# requirements.txt.
+setuptools>=83.0.0
