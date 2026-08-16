@@ -85,7 +85,10 @@ def test_targets_file_parses_one_target_per_valid_line(tmp_path, monkeypatch):
 
     runner = CliRunner()
     result = runner.invoke(
-        main, ["scan", "--targets-file", str(targets), "--no-sqlmap"],
+        main, [
+            "scan", "--targets-file", str(targets), "--no-sqlmap",
+            "--output-dir", str(tmp_path),
+        ],
     )
 
     assert result.exit_code == 0, result.output

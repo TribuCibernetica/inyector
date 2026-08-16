@@ -24,6 +24,36 @@ funcionalidad nueva compatible hacia atrás, PATCH para fixes.
   (`needs: [lint, security]` en `test.yml`), así que la suite real de
   pytest (282/282 en local) nunca llegó a correr en ninguna de las 13
   corridas de CI desde que el repo se hizo público.
+- `pip-audit` fallaba por `setuptools 79.0.1` (`PYSEC-2026-3447`) —
+  no es una dependencia directa de inyector, viene con la imagen base
+  de Python del runner de CI, pero `pip-audit` audita todo lo
+  instalado en el entorno. Pineado `setuptools>=83.0.0` en
+  `requirements-dev.txt` para forzar la versión parchada.
+- gitleaks marcaba como secreto un fixture de test
+  (`tests/test_ai_assistant.py`, `api_key="explicit-key-123"`) — falso
+  positivo de la regla `generic-api-key` por forma de patrón, no un
+  secreto real. Reescaneado como "nuevo" tras el force-push de historial
+  de más abajo (todo el historial cambió de hash de golpe). Agregado
+  `gitleaks:allow` inline + `.gitleaksignore` con el fingerprint exacto.
+- `tests/test_targets_file.py::test_targets_file_parses_one_target_per_valid_line`
+  fallaba con `PermissionError` en CI (Linux, fuera de Docker): sin
+  `--output-dir` explícito, `scan` intenta crear `/app/reports` (el
+  default pensado para DENTRO del container) directo en la raíz del
+  filesystem — un usuario sin privilegios no puede. Bug real que
+  siempre estuvo ahí pero invisible porque `unit-tests` nunca había
+  llegado a correr en CI hasta el fix de arriba. Ahora el test pasa
+  `--output-dir` apuntando a `tmp_path`.
+- `tests/test_timing_calculator.py` — dos tests fallaban con
+  `StopIteration` en CI (Linux, pytest 9.0.3) pero no en otros entornos:
+  `patch("...timing_calculator.time.time", side_effect=[...lista finita...])`
+  patchea el módulo `time` GLOBAL del proceso (`import time` comparte
+  el mismo objeto módulo en todos lados), y el propio `logging` de
+  Python llama a `time.time()` para poner timestamp a cada
+  `LogRecord` — cualquier `logger.info` de por medio consume valores
+  extra de la lista, y cuántos exactamente depende de la config de
+  logging/pytest de cada entorno. Cambiado a repetir el último valor
+  indefinidamente (`itertools.chain(values, itertools.repeat(values[-1]))`)
+  en vez de una lista finita.
 
 ## [1.1.0] - 2026-08-16
 
