@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 LABEL maintainer="TribuCibernetica <hola@tribucibernetica.com>"
 LABEL description="inyector — SQL Injection Intelligence Tool"
