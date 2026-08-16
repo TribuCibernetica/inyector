@@ -9,8 +9,7 @@ funcionalidad nueva compatible hacia atrás, PATCH para fixes.
 
 ## [Unreleased]
 
-Todavía no tagueado — se convierte en `1.1.0` (MINOR: solo agrega,
-nada rompe compatibilidad) cuando se commitee y se taguee.
+## [1.1.0] - 2026-08-16
 
 ### Corregido
 - `WAFBypassProber._safe_get` seguía redirects (`allow_redirects=True`)

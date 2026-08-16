@@ -7,6 +7,7 @@ los resultados del scan y reconocimiento.
 import json
 import os
 from datetime import datetime
+from inyector import __version__
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,7 +31,7 @@ class JSONReportGenerator:
         report = {
             "meta": {
                 "tool": "inyector",
-                "version": "1.0.0",
+                "version": __version__,
                 "author": "TribuCibernetica",
                 "generated_at": datetime.now().isoformat(),
                 "disclaimer": (

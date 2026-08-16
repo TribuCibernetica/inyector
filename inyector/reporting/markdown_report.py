@@ -7,6 +7,7 @@ tickets, PRs o wikis internas.
 
 import os
 from datetime import datetime
+from inyector import __version__
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -290,7 +291,7 @@ class MarkdownReportGenerator:
         lines.append("---")
         lines.append("")
         lines.append(
-            "*Generado por **inyector v1.0.0** — TribuCibernetica · "
+            f"*Generado por **inyector v{__version__}** — TribuCibernetica · "
             "tribucibernetica.com · hola@tribucibernetica.com*"
         )
         lines.append("")

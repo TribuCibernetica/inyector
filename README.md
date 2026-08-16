@@ -13,12 +13,15 @@
 
 **inyector** es una herramienta de reconocimiento y detección de SQL Injection que orquesta **sqlmap** de manera inteligente. A diferencia de usar sqlmap directamente, inyector realiza un reconocimiento previo del objetivo para:
 
-- 🔍 **Fingerprinting de WAF** — Detecta automáticamente Cloudflare, AWS WAF, ModSecurity, Imperva, Akamai, Wordfence, Sucuri, F5 y Barracuda
+- 🔍 **Fingerprinting de WAF** — Detecta automáticamente Cloudflare, AWS WAF, ModSecurity, Imperva, Akamai, Wordfence, Sucuri, F5, Barracuda y WAFs institucionales sin firma de vendor conocida (bloqueo por keyword+sinkhole redirect)
 - 🧠 **Selección inteligente de tamper scripts** — Elige los scripts de evasión óptimos según el WAF detectado
+- 🧪 **Descubrimiento empírico de bypass de WAF** — Cuando el WAF es de vendor desconocido, prueba en vivo (con requests HTTP crudos, sin sqlmap) qué mutación puntual esquiva el bloqueo antes de comprometerse a un scan completo — nunca asume un bypass "universal", siempre reporta qué se probó
+- 🔑 **Manejo de tokens CSRF/dinámicos** — Detecta `__VIEWSTATE`, `logintoken`, `csrfmiddlewaretoken` y similares en forms, y le indica a sqlmap que los refresque antes de cada request (no solo una vez) — necesario para logins con token de un solo uso o que se regeneran en cada respuesta
 - 🏗️ **Detección de stack tecnológico** — Identifica lenguaje, framework y base de datos
 - 🔧 **Detección de ORM** — Identifica Django ORM, SQLAlchemy, Hibernate, Prisma, Sequelize, ActiveRecord y Eloquent
 - 🕸️ **Soporte GraphQL nativo** — Descubre endpoints, verifica introspección y encuentra argumentos inyectables
 - 🥷 **Modo stealth avanzado** — Timing con distribución gaussiana, rotación de headers y pausas automáticas
+- 📦 **Extracción persistente post-confirmación** — Comando `dump` separado para enumerar/extraer datos de un target ya confirmado, con reintentos automáticos antes de rendirse
 - 📊 **Reportes HTML ejecutivos** — Reportes profesionales con tema oscuro y recomendaciones de remediación
 
 ## Requisitos
@@ -95,6 +98,42 @@ docker compose run inyector scan \
 
 Requiere una API key de Gemini configurada — ver [Asistente de IA (opcional)](#asistente-de-ia-opcional) más abajo.
 
+### Login con token CSRF/de un solo uso
+
+```bash
+docker compose run inyector scan \
+  -u "https://target.com/login" \
+  --method POST \
+  --data "logintoken=CAPTURADO&username=test&password=test" \
+  -p username \
+  --csrf-field logintoken \
+  --stealth
+```
+
+Con `--crawl`/`--crawl-all` esta detección es automática — el flag es
+para cuando `-u`/`--data` se arman a mano. Ver
+[Manejo de tokens CSRF/dinámicos](#manejo-de-tokens-csrfdinámicos) más abajo.
+
+### Enumerar y extraer datos de un target ya confirmado
+
+```bash
+# Enumeración rápida
+docker compose run inyector dump -u "https://target.com/page?id=1" -p id --current
+docker compose run inyector dump -u "https://target.com/page?id=1" -p id --dbs
+docker compose run inyector dump -u "https://target.com/page?id=1" -p id -D nombre_db --tables
+
+# Extraer una tabla puntual
+docker compose run inyector dump \
+  -u "https://target.com/page?id=1" -p id \
+  -D nombre_db -T usuarios --dump
+```
+
+`dump` es un comando separado de `scan` — reusa el reconocimiento y la
+sesión de sqlmap ya confirmados contra ese target (mismo `--output-dir`),
+así que no repite la detección desde cero. Si el primer intento viene
+vacío, reintenta solo antes de rendirse (ver
+[Extracción persistente (`dump`)](#extracción-persistente-dump) más abajo).
+
 ### Múltiples targets desde un archivo
 
 ```bash
@@ -167,11 +206,58 @@ start reports\scan_*.html      # Windows
 | `--ai-max-calls` | Tope de llamadas a Gemini para toda la corrida (compartido entre todos los targets con `--crawl-all`/`--targets-file`). Sin esto, `--ai-assist` no tiene límite propio más allá de `--crawl-all-limit` | sin límite |
 | `--targets-file` | Archivo con una URL por línea (líneas vacías o `#` se ignoran) para escanear cada una por separado. No se puede combinar con `-u`/`--crawl-all` | — |
 | `--resume` | Reusar el recon guardado de un scan anterior al mismo target (evita repetir WAF/Stack/ORM/GraphQL) | off |
+| `--csrf-field` | Nombre de campo (hidden input) anti-CSRF/token dinámico a refrescar antes de cada request de sqlmap. Con `--crawl`/`--crawl-all` la detección ya es automática — este flag es para cuando `-u`/`--data` se arman a mano | auto (con `--crawl`) |
+| `--csrf-url` | URL de donde releer `--csrf-field` antes de cada request | misma `-u` |
 | `--no-sqlmap` | Solo reconocimiento | off |
 | `--proxy` | Proxy HTTP | — |
 | `--tor` | Enrutar por Tor | off |
 | `-v, --verbose` | Output detallado | off |
 | `-q, --quiet` | Solo resultados finales | off |
+
+### Comando `dump`
+
+Aparte de `scan`, `recon` y `report`, existe un cuarto comando —
+`dump` — para enumerar/extraer datos de un target **ya confirmado**
+inyectable. Toma los mismos flags de identificación de target que
+`scan` (`-u/-p/--method/--data/--cookie/--header/--csrf-field/--output-dir/--stealth`)
+más flags de acción (al menos una):
+
+| Flag | Qué hace |
+|---|---|
+| `--current` | `--current-db --current-user --hostname --is-dba` |
+| `--dbs` | Enumerar bases de datos |
+| `-D, --db` + `--tables` | Enumerar tablas de una base |
+| `-D -T, --table` + `--columns` | Enumerar columnas de una tabla |
+| `-D -T` + `--dump` | Extraer filas (`-C/--columns-list`, `--where`, `--start`, `--stop` opcionales) |
+| `--dump-all` | Extraer todo (`--exclude-sysdbs` por default; `--include-sysdbs` para incluirlas) |
+| `--search` | Buscar bases/tablas/columnas por nombre (usar con `-D`/`-T`/`-C` como patrón) |
+
+`dump` no repite la detección de la inyección desde cero: reusa el
+mismo `--output-dir`/URL/param/method que el `scan` que ya la
+confirmó, y sqlmap resume su propia sesión cacheada en vez de
+re-detectar. Si un intento viene vacío (y no fue un fallo de conexión
+real), reintenta automáticamente antes de rendirse: primero escala
+`--level`/`--risk` al máximo, y para las acciones de enumeración
+(baratas) fuerza una técnica a la vez si sigue sin resultados —
+`--dump`/`--dump-all` sobre una tabla completa solo escala level/risk
+una vez, para no repetir 5 técnicas contra un boolean-blind que puede
+tardar horas. El reporte muestra estructura y conteos (bases, tablas,
+columnas, cantidad de filas) — los valores extraídos quedan en el CSV
+que sqlmap ya genera por su cuenta bajo `<output-dir>/<host>/dump/`.
+
+### Manejo de tokens CSRF/dinámicos
+
+Muchos logins traen un campo hidden que cambia en cada carga de
+página (`__VIEWSTATE` de ASP.NET WebForms, `logintoken` de Moodle,
+`csrfmiddlewaretoken` de Django, etc.) — algunos son de un solo uso
+(reusar un valor viejo simplemente no procesa el login), otros solo
+confunden el chequeo de estabilidad de sqlmap al regenerarse en cada
+respuesta. Con `--crawl`/`--crawl-all`, inyector detecta estos campos
+automáticamente en los `<form>` del sitio y le indica a sqlmap
+(`--csrf-token`/`--csrf-url`) que vuelva a leer un valor fresco antes
+de CADA request que manda, en vez de mandar siempre el mismo valor
+capturado una sola vez. Sin `--crawl` (cuando `-u`/`--data` se arman a
+mano), usá `--csrf-field`/`--csrf-url` para indicarlo manualmente.
 
 ## Diferencias con sqlmap puro
 
@@ -185,6 +271,9 @@ start reports\scan_*.html      # Windows
 | Reporte HTML ejecutivo | ❌ No | ✅ Dark theme |
 | Recomendaciones de remediación | ❌ No | ✅ Por ORM/Stack |
 | Zero-install (Docker) | ❌ No | ✅ Un comando |
+| Bypass de WAF | Tampers fijos manuales | ✅ Descubrimiento empírico contra el target real |
+| Tokens CSRF/dinámicos (VIEWSTATE, logintoken) | Un valor estático capturado | ✅ Se refrescan antes de cada request |
+| Extracción post-confirmación | Un solo intento | ✅ `dump` con reintentos automáticos antes de rendirse |
 
 ## Asistente de IA (opcional)
 

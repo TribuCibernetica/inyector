@@ -7,6 +7,7 @@ y toda la información del scan y reconocimiento.
 import os
 from datetime import datetime
 from jinja2 import Template
+from inyector import __version__
 from inyector.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -76,7 +77,7 @@ class HTMLReportGenerator:
     <div class="container">
         <div class="header">
             <div class="logo">&#x27C1; INYECTOR</div>
-            <div class="subtitle">Reporte de SQL Injection — v1.0.0</div>
+            <div class="subtitle">Reporte de SQL Injection — v{{ tool_version }}</div>
             <div class="scan-info">{{ scan_date }} · {{ target_url }}</div>
         </div>
         <div class="severity-banner {{ severity_class }}">
@@ -187,7 +188,7 @@ class HTMLReportGenerator:
             <div class="card"><div class="card-header"><h3>Recomendaciones Generales</h3></div>{% for rec in general_remediation %}<div class="remediation-item">{{ rec }}</div>{% endfor %}</div>
         </div>
         <div class="footer">
-            <p>Generado por <span class="logo-small">&#x27C1; inyector v1.0.0</span> — TribuCibernetica</p>
+            <p>Generado por <span class="logo-small">&#x27C1; inyector v{{ tool_version }}</span> — TribuCibernetica</p>
             <p style="margin-top: 8px;">tribucibernetica.com · hola@tribucibernetica.com</p>
             <p style="margin-top: 16px; font-size: 0.75rem;">Este reporte es confidencial. Solo para uso en entornos autorizados.<br>El uso de esta herramienta contra sistemas sin autorización es ilegal.</p>
         </div>
@@ -221,6 +222,7 @@ class HTMLReportGenerator:
         severity_class = severity_class_map.get(severity, "limpio")
 
         template_data = {
+            "tool_version": __version__,
             "scan_date": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             "target_url": enriched_results.get("target_url", "N/A"),
             "severity": severity,

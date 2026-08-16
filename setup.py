@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="inyector",
-    version="1.0.0",
+    version="1.1.0",
     packages=find_packages(),
     # Mantener sincronizado con requirements.txt — este archivo es lo
     # que se usa si alguien instala fuera de Docker (pip install -e .).
