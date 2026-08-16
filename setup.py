@@ -10,7 +10,7 @@ setup(
         "click==8.3.3",
         "requests==2.33.0",
         "httpx==0.28.1",
-        "beautifulsoup4==4.12.3",
+        "beautifulsoup4==4.15.0",
         "rich==13.7.0",
         "jinja2==3.1.6",
         "python-whois==0.9.4",
