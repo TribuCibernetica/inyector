@@ -14,7 +14,7 @@ setup(
         "rich==13.7.0",
         "jinja2==3.1.6",
         "python-whois==0.9.4",
-        "dnspython==2.6.1",
+        "dnspython==2.8.0",
         "websocket-client==1.7.0",
         "urllib3==2.7.0",
         "fake-useragent==1.5.1",
