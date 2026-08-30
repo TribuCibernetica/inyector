@@ -7,7 +7,7 @@ setup(
     # Mantener sincronizado con requirements.txt — este archivo es lo
     # que se usa si alguien instala fuera de Docker (pip install -e .).
     install_requires=[
-        "click==8.3.3",
+        "click==8.5.0",
         "requests==2.33.0",
         "httpx==0.28.1",
         "beautifulsoup4==4.12.3",
