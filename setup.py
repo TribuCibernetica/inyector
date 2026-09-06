@@ -19,7 +19,7 @@ setup(
         "urllib3==2.7.0",
         "fake-useragent==1.5.1",
         "colorama==0.4.6",
-        "pydantic==2.13.4",
+        "pydantic==2.13.5",
         "brotli==1.2.0",
         "google-genai==2.12.1",
     ],
