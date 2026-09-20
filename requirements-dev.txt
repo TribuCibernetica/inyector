@@ -1,6 +1,6 @@
 -r requirements.txt
 pytest==9.0.3
-ruff==0.16.1
+ruff==0.16.8
 mypy==2.3.0
 pip-audit==2.10.1
 # No es dependencia directa de inyector -- viene con la imagen base de
