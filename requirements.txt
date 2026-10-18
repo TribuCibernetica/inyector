@@ -10,7 +10,7 @@ websocket-client==1.7.0
 urllib3==2.7.0
 fake-useragent==1.5.1
 colorama==0.4.6
-pydantic==2.13.4
+pydantic==2.14.1
 # Sin esto, requests/urllib3 no pueden decodificar respuestas con
 # Content-Encoding: br (Brotli) — muy común en sitios modernos detrás
 # de CDNs. response.text queda como binario sin decodificar, y TODOS
