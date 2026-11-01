@@ -17,7 +17,7 @@ pydantic==2.13.4
 # los detectores que buscan firmas por substring (WAF, Stack, ORM,
 # Crawler) fallan en silencio contra esos sitios sin ningún error
 # visible (bug real encontrado probando contra preview.owasp-juice.shop).
-brotli==1.2.0
+brotli==1.2.1
 # Asistente de IA opcional (--ai-assist). Solo se usa si el usuario
 # configura GEMINI_API_KEY — sin eso, el paquete queda instalado pero
 # nunca se importa ni se llama a ninguna API externa.
